@@ -7,7 +7,7 @@
 
 set -euo pipefail
 
-DOMINIO="${1:-nfe.kaysmelo.com.br}"
+DOMINIO="${1:-nf.ksotica.com.br}"
 
 echo "🔧 Setup NFe API"
 echo "   Domínio: $DOMINIO"

@@ -6,7 +6,11 @@ function required(name: string): string {
   return v
 }
 
+// Domínio público onde a API é acessível (usado em logs/debug)
+const DOMINIO_PUBLICO = process.env.DOMINIO_PUBLICO || 'nf.ksotica.com.br'
+
 export const config = {
+  dominioPublico: DOMINIO_PUBLICO,
   port: Number(process.env.PORT || 3001),
   nodeEnv: process.env.NODE_ENV || 'development',
 
