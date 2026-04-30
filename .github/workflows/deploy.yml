@@ -1,0 +1,97 @@
+name: Deploy NFe API
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  # ============================================================
+  # 1) Frontend admin → /var/www/nfe-admin
+  # ============================================================
+  deploy-admin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: admin/package-lock.json
+
+      - name: Install admin deps
+        working-directory: admin
+        run: npm ci
+
+      - name: Build admin
+        working-directory: admin
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          VITE_API_URL: ${{ secrets.ADMIN_API_URL }}
+        run: npm run build
+
+      - name: Deploy admin
+        uses: easingthemes/ssh-deploy@main
+        with:
+          SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_KEY }}
+          REMOTE_HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: root
+          SOURCE: admin/dist/
+          TARGET: /var/www/nfe-admin/
+          ARGS: "-avz --delete"
+
+  # ============================================================
+  # 2) Backend API → /var/www/nfe-api
+  # ============================================================
+  deploy-api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+
+      - name: Install api deps
+        working-directory: api
+        run: npm ci
+
+      - name: Build api
+        working-directory: api
+        run: npm run build
+
+      - name: Prepare deploy bundle
+        run: |
+          mkdir -p deploy-api
+          cp -r api/dist deploy-api/
+          cp api/package.json deploy-api/
+          cp api/package-lock.json deploy-api/
+          cp api/ecosystem.config.cjs deploy-api/
+
+      - name: Deploy api
+        uses: easingthemes/ssh-deploy@main
+        with:
+          SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_KEY }}
+          REMOTE_HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: root
+          SOURCE: deploy-api/
+          TARGET: /var/www/nfe-api/
+          ARGS: "-avz"
+
+      - name: Install deps + restart
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: root
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -e
+            cd /var/www/nfe-api
+            npm ci --omit=dev
+            pm2 describe nfe-api >/dev/null 2>&1 \
+              && pm2 reload ecosystem.config.cjs \
+              || pm2 start ecosystem.config.cjs
+            pm2 save
