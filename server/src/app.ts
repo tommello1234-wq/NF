@@ -8,7 +8,7 @@ import { nfeRoutes } from './routes/nfe.js'
 import { adminEmpresasRoutes } from './routes/adminEmpresas.js'
 import { adminNotasRoutes } from './routes/adminNotas.js'
 
-async function main() {
+export async function buildApp() {
   const app = Fastify({
     logger: {
       level: config.nodeEnv === 'development' ? 'debug' : 'info',
@@ -31,25 +31,12 @@ async function main() {
     },
   })
 
-  // Rotas públicas (sem auth)
   await app.register(healthRoutes, { prefix: '/v1' })
-
-  // Rotas do cliente (auth: API key)
   await app.register(certificadoRoutes, { prefix: '/v1' })
   await app.register(nfeRoutes, { prefix: '/v1' })
 
-  // Rotas admin (auth: JWT Supabase Auth)
   await app.register(adminEmpresasRoutes, { prefix: '/admin' })
   await app.register(adminNotasRoutes, { prefix: '/admin' })
 
-  try {
-    await app.listen({ port: config.port, host: '0.0.0.0' })
-    app.log.info(`🚀 NFe API rodando em http://localhost:${config.port}/v1/health`)
-    app.log.info(`📜 Ambiente SEFAZ: ${config.nfe.ambiente === 1 ? 'PRODUÇÃO' : 'HOMOLOGAÇÃO'} (${config.nfe.uf})`)
-  } catch (err) {
-    app.log.error(err)
-    process.exit(1)
-  }
+  return app
 }
-
-main()

@@ -1,7 +1,9 @@
-api/
 supabase/
 docs/
 .github/
 admin/node_modules/
 admin/dist/
 admin/*.tsbuildinfo
+server/node_modules/
+server/dist/
+server/*.tsbuildinfo

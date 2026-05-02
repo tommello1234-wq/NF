@@ -2,11 +2,21 @@
   "name": "notas-washi",
   "private": true,
   "type": "module",
+  "workspaces": [
+    "admin",
+    "server"
+  ],
   "scripts": {
-    "install:admin": "npm ci --prefix admin",
-    "build": "npm run build --prefix admin"
+    "build": "npm run build --workspace admin",
+    "dev:admin": "npm run dev --workspace admin",
+    "dev:server": "npm run dev --workspace server",
+    "typecheck": "npm run typecheck --workspace server && npm run build --workspace admin"
   },
   "engines": {
     "node": "22.x"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.17",
+    "typescript": "^5.9.3"
   }
 }

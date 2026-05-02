@@ -6,11 +6,11 @@ Produto independente pra emissão de documentos fiscais eletrônicos (NF-e, NFC-
 
 ```
 nfe-api/
-├── api/                  # Backend Fastify (Node 20, TypeScript)
-├── admin/                # Painel admin React/Vite (cadastro de empresas, API keys, certificado)
+├── api/                  # Funcao Vercel que expoe a API em /api
+├── server/               # Backend Fastify (Node 22, TypeScript)
+├── admin/                # Painel admin React/Vite
 ├── supabase/migrations/  # SQL do banco dedicado
-├── docs/api.md           # Referência dos endpoints
-└── .github/workflows/    # CI/CD (deploy VPS)
+└── docs/api.md           # Referencia dos endpoints
 ```
 
 ## Setup local (primeira vez)
@@ -28,7 +28,7 @@ nfe-api/
 ### 2. Rodar o backend
 
 ```bash
-cd api
+cd server
 cp .env.example .env
 # preenche SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, CERT_ENCRYPTION_KEY
 npm install
@@ -42,43 +42,44 @@ Testa: `curl http://localhost:3001/v1/health`
 ```bash
 cd admin
 cp .env.example .env
-# preenche VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, VITE_API_URL
+# preenche VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY
 npm install
 npm run dev
 ```
 
 Abre: http://localhost:5174
 
-## Deploy (VPS)
+## Deploy na Vercel
 
-## Deploy do painel na Vercel
-
-Este repositório é um monorepo. A Vercel deve publicar somente o painel React em `admin/`.
+Este repositorio e um monorepo. A Vercel publica o painel React em `admin/` e a API Fastify como funcao em `api/index.ts`.
 
 O deploy já está configurado por:
 
-- `package.json` na raiz, delegando install/build para `admin`
-- `vercel.json`, com `outputDirectory` em `admin/dist`
-- `.vercelignore`, evitando que o backend Fastify seja tratado como Functions da Vercel
+- `package.json` na raiz com workspaces `admin` e `server`
+- `vercel.json`, com `outputDirectory` em `admin/dist` e rewrite de `/api/*`
+- `api/index.ts`, que adapta a API Fastify para Vercel Functions
 
-Variáveis opcionais na Vercel:
+Variaveis para configurar na Vercel:
 
 ```env
 VITE_SUPABASE_URL=https://yfkkitbnlvbfzgbxyhmn.supabase.co
 VITE_SUPABASE_ANON_KEY=sb_publishable_jCbn5xTva79AUdpUydpkKg_k7XajKt0
-VITE_API_URL=https://api.siteteste.store
+SUPABASE_URL=https://yfkkitbnlvbfzgbxyhmn.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=<copie do server/.env local>
+CERT_ENCRYPTION_KEY=<copie do server/.env local>
+NFE_AMBIENTE=2
+NFE_UF=CE
 ```
 
-Se `VITE_API_URL` não for configurada, o build de produção usa `https://api.siteteste.store`.
-Para o painel funcionar depois do login, a API precisa estar pública nesse endereço ou em outro valor configurado em `VITE_API_URL`.
+Nao configure `VITE_API_URL` quando frontend e API estiverem na mesma Vercel. Sem essa variavel, o painel usa `/api` automaticamente.
 
-### Primeira vez
+### Deploy antigo em VPS
 
 ```bash
 # SSH na VPS
 ssh root@<ip_vps>
 cd /tmp
-curl -fsSL https://raw.githubusercontent.com/<seu_user>/nfe-api/main/api/scripts/setup-vps.sh | bash -s -- nfe.seu-dominio.com.br
+curl -fsSL https://raw.githubusercontent.com/<seu_user>/nfe-api/main/server/scripts/setup-vps.sh | bash -s -- nfe.seu-dominio.com.br
 ```
 
 Depois crie `/var/www/nfe-api/.env` com as envs de produção e configure HTTPS:

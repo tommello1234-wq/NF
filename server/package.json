@@ -12,11 +12,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@fastify/cors": "^9.0.1",
-    "@fastify/multipart": "^8.3.0",
+    "@fastify/cors": "^11.2.0",
+    "@fastify/multipart": "^10.0.0",
     "@supabase/supabase-js": "^2.102.1",
     "dotenv": "^16.4.5",
-    "fastify": "^4.28.1",
+    "fastify": "^5.8.5",
     "node-forge": "^1.3.1",
     "zod": "^3.23.8"
   },
