@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Routes, Route, Link, Navigate, useNavigate, useLocation } from 'react-router-dom'
-import { Building2, ShieldCheck, FileText, LogOut, Package, ReceiptText, Users } from 'lucide-react'
+import { Building2, ShieldCheck, FileText, LogOut, Package, ReceiptText, Settings2, Users } from 'lucide-react'
 import { supabase } from './lib/supabase'
 import Login from './pages/Login'
 import Empresas from './pages/Empresas'
@@ -9,6 +9,7 @@ import Notas from './pages/Notas'
 import Clientes from './pages/Clientes'
 import Produtos from './pages/Produtos'
 import Darfs from './pages/Darfs'
+import Fiscal from './pages/Fiscal'
 
 function Layout({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate()
@@ -28,6 +29,7 @@ function Layout({ children }: { children: React.ReactNode }) {
     { to: '/empresas', label: 'Empresas', icon: Building2 },
     { to: '/clientes', label: 'Clientes', icon: Users },
     { to: '/produtos', label: 'Produtos', icon: Package },
+    { to: '/fiscal', label: 'Fiscal', icon: Settings2 },
     { to: '/notas', label: 'Notas Emitidas', icon: FileText },
     { to: '/darfs', label: 'DARF', icon: ReceiptText },
   ]
@@ -102,6 +104,7 @@ export default function App() {
       <Route path="/empresas/:id" element={<RequireAuth><EmpresaDetalhe /></RequireAuth>} />
       <Route path="/clientes" element={<RequireAuth><Clientes /></RequireAuth>} />
       <Route path="/produtos" element={<RequireAuth><Produtos /></RequireAuth>} />
+      <Route path="/fiscal" element={<RequireAuth><Fiscal /></RequireAuth>} />
       <Route path="/notas" element={<RequireAuth><Notas /></RequireAuth>} />
       <Route path="/darfs" element={<RequireAuth><Darfs /></RequireAuth>} />
       <Route path="*" element={<Navigate to="/empresas" replace />} />

@@ -34,6 +34,16 @@ interface Produto {
   ativo: boolean
 }
 
+interface NaturezaOperacao {
+  id: string
+  nome: string
+  natureza: string
+  cfop_padrao: string | null
+  finalidade: string
+  modalidade_frete: number
+  ativo: boolean
+}
+
 interface Nota {
   id: string
   empresa_id: string
@@ -80,11 +90,13 @@ export default function Notas() {
   const [empresas, setEmpresas] = useState<Empresa[]>([])
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [produtos, setProdutos] = useState<Produto[]>([])
+  const [naturezas, setNaturezas] = useState<NaturezaOperacao[]>([])
   const [notas, setNotas] = useState<Nota[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({
     empresa_id: '',
+    natureza_operacao_id: '',
     cliente_id: '',
     produto_id: '',
     tipo: 'nfe',
@@ -116,12 +128,18 @@ export default function Notas() {
   }
 
   async function loadCadastros(empresaId: string) {
-    const [clientesData, produtosData] = await Promise.all([
+    const [clientesData, produtosData, naturezasData] = await Promise.all([
       apiGet<Cliente[]>(`/admin/clientes?empresa_id=${empresaId}&ativo=true`).catch(() => []),
       apiGet<Produto[]>(`/admin/produtos?empresa_id=${empresaId}&ativo=true`).catch(() => []),
+      apiGet<NaturezaOperacao[]>(`/admin/naturezas-operacao?empresa_id=${empresaId}&ativo=true`).catch(() => []),
     ])
     setClientes(clientesData)
     setProdutos(produtosData)
+    setNaturezas(naturezasData)
+    setForm((current) => ({
+      ...current,
+      natureza_operacao_id: naturezasData[0]?.id || '',
+    }))
   }
 
   async function changeEmpresa(empresaId: string) {
@@ -129,6 +147,7 @@ export default function Notas() {
     setForm((current) => ({
       ...current,
       empresa_id: empresaId,
+      natureza_operacao_id: '',
       cliente_id: '',
       produto_id: '',
       serie: current.tipo === 'nfce' ? empresa?.serie_nfce || 1 : empresa?.serie_nfe || 1,
@@ -303,6 +322,21 @@ export default function Notas() {
             />
           </div>
           <div className="xl:col-span-2">
+            <label className={label}>Natureza de operacao</label>
+            <select
+              className={input}
+              value={form.natureza_operacao_id}
+              onChange={(event) => setForm((current) => ({ ...current, natureza_operacao_id: event.target.value }))}
+            >
+              <option value="">Padrao manual</option>
+              {naturezas.map((natureza) => (
+                <option key={natureza.id} value={natureza.id}>
+                  {natureza.nome} - {natureza.cfop_padrao || 'sem CFOP'}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="xl:col-span-2">
             <label className={label}>Cliente cadastrado</label>
             <select
               className={input}
@@ -332,8 +366,9 @@ export default function Notas() {
             <div className="xl:col-span-4 rounded-lg border border-info/20 bg-info-bg p-3 text-xs text-info">
               {(() => {
                 const produto = produtos.find((item) => item.id === form.produto_id)
+                const natureza = naturezas.find((item) => item.id === form.natureza_operacao_id)
                 return produto
-                  ? `Fiscal do item: NCM ${produto.ncm || '-'} | CFOP ${produto.cfop || '-'} | CST/CSOSN ${produto.cst_csosn || '-'} | ICMS ${produto.aliquota_icms || 0}% | PIS ${produto.aliquota_pis || 0}% | COFINS ${produto.aliquota_cofins || 0}%`
+                  ? `Fiscal do item: NCM ${produto.ncm || '-'} | CFOP ${produto.cfop || natureza?.cfop_padrao || '-'} | CST/CSOSN ${produto.cst_csosn || '-'} | ICMS ${produto.aliquota_icms || 0}% | PIS ${produto.aliquota_pis || 0}% | COFINS ${produto.aliquota_cofins || 0}%`
                   : ''
               })()}
             </div>

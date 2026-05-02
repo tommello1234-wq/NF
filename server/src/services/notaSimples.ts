@@ -44,10 +44,23 @@ type ProdutoNfe = {
   aliquota_cofins?: number | string | null
 }
 
+type NaturezaOperacaoNfe = {
+  nome?: string | null
+  natureza?: string | null
+  tipo_operacao?: 'entrada' | 'saida' | null
+  finalidade?: 'normal' | 'complementar' | 'ajuste' | 'devolucao' | null
+  cfop_padrao?: string | null
+  consumidor_final?: boolean | null
+  indicador_presenca?: number | null
+  modalidade_frete?: number | null
+  informacoes_adicionais?: string | null
+}
+
 type NotaSimpleInput = {
   empresa: EmpresaNfe
   cliente?: ClienteNfe | null
   produto?: ProdutoNfe | null
+  natureza?: NaturezaOperacaoNfe | null
   nota: {
     tipo: 'nfe' | 'nfce'
     numero: number
@@ -143,6 +156,13 @@ function normalizarCrt(empresa: EmpresaNfe) {
   if (empresa.regime_tributario === 'mei') return 4
   if (empresa.regime_tributario === 'lucro_presumido' || empresa.regime_tributario === 'lucro_real') return 3
   return 1
+}
+
+function finalidadeCodigo(finalidade?: string | null) {
+  if (finalidade === 'complementar') return '2'
+  if (finalidade === 'ajuste') return '3'
+  if (finalidade === 'devolucao') return '4'
+  return '1'
 }
 
 function enderecoEmitenteXml(empresa: EmpresaNfe) {
@@ -253,6 +273,7 @@ function impostoXml(empresa: EmpresaNfe, produto: ProdutoNfe | null | undefined,
 
 export function gerarXmlSimples(input: NotaSimpleInput) {
   const { empresa, cliente, produto, nota, chaveAcesso } = input
+  const natureza = input.natureza
   const modelo = nota.tipo === 'nfce' ? '65' : '55'
   const cUF = cufFromEmpresa(empresa)
   const cNF = chaveAcesso.slice(35, 43)
@@ -265,7 +286,7 @@ export function gerarXmlSimples(input: NotaSimpleInput) {
   const imposto = impostoXml(empresa, produto, valorProduto)
   const avisos = validarPreNfe(input)
   const ncm = digits(produto?.ncm).padStart(8, '0').slice(0, 8)
-  const cfop = digits(produto?.cfop || '5102').padStart(4, '0').slice(0, 4)
+  const cfop = digits(produto?.cfop || natureza?.cfop_padrao || '5102').padStart(4, '0').slice(0, 4)
   const unidade = nfeText(produto?.unidade, 'UN').toUpperCase().slice(0, 6)
   const codigoProduto = nfeText(produto?.codigo_interno, 'ITEM-1').slice(0, 60)
   const indIEDest = cliente?.ie ? '1' : '9'
@@ -277,22 +298,22 @@ export function gerarXmlSimples(input: NotaSimpleInput) {
     <ide>
       ${xmlTag('cUF', cUF)}
       ${xmlTag('cNF', cNF)}
-      ${xmlTag('natOp', 'VENDA DE MERCADORIA')}
+      ${xmlTag('natOp', nfeText(natureza?.natureza, 'VENDA DE MERCADORIA').slice(0, 60))}
       ${xmlTag('mod', modelo)}
       ${xmlTag('serie', nota.serie)}
       ${xmlTag('nNF', nota.numero)}
       ${xmlTag('dhEmi', formatDhEmi())}
       ${xmlTag('dhSaiEnt', formatDhEmi())}
-      ${xmlTag('tpNF', '1')}
+      ${xmlTag('tpNF', natureza?.tipo_operacao === 'entrada' ? '0' : '1')}
       ${xmlTag('idDest', empresa.endereco_uf && cliente?.endereco_uf && empresa.endereco_uf !== cliente.endereco_uf ? '2' : '1')}
       ${xmlTag('cMunFG', cMunFG)}
       ${xmlTag('tpImp', modelo === '65' ? '4' : '1')}
       ${xmlTag('tpEmis', '1')}
       ${xmlTag('cDV', cDV)}
       ${xmlTag('tpAmb', Number(empresa.ambiente_sefaz || 2))}
-      ${xmlTag('finNFe', '1')}
-      ${xmlTag('indFinal', '1')}
-      ${xmlTag('indPres', '9')}
+      ${xmlTag('finNFe', finalidadeCodigo(natureza?.finalidade))}
+      ${xmlTag('indFinal', natureza?.consumidor_final === false ? '0' : '1')}
+      ${xmlTag('indPres', natureza?.indicador_presenca ?? 9)}
       ${xmlTag('procEmi', '0')}
       ${xmlTag('verProc', 'notas-washi-0.2')}
     </ide>
@@ -354,7 +375,7 @@ export function gerarXmlSimples(input: NotaSimpleInput) {
         ${xmlTag('vTotTrib', dec(0))}
       </ICMSTot>
     </total>
-    <transp>${xmlTag('modFrete', '9')}</transp>
+    <transp>${xmlTag('modFrete', natureza?.modalidade_frete ?? 9)}</transp>
     <pag>
       <detPag>
         ${xmlTag('indPag', '0')}
@@ -363,7 +384,7 @@ export function gerarXmlSimples(input: NotaSimpleInput) {
       </detPag>
     </pag>
     <infAdic>
-      ${xmlTag('infCpl', `PRE-NF-e para conferencia. ${avisos.join(' ')}`)}
+      ${xmlTag('infCpl', `PRE-NF-e para conferencia. ${natureza?.informacoes_adicionais || ''} ${avisos.join(' ')}`)}
     </infAdic>
   </infNFe>
 </NFe>
@@ -414,6 +435,7 @@ function formatDoc(value: unknown) {
 
 export function gerarDanfeSimples(input: NotaSimpleInput) {
   const { empresa, cliente, produto, nota, chaveAcesso, protocolo } = input
+  const natureza = input.natureza
   const quantidade = Number(nota.quantidade || 1)
   const valorUnitario = Number(nota.valor_unitario || nota.valor_total)
   const valorProduto = Number(nota.valor_total || quantidade * valorUnitario)
@@ -432,7 +454,7 @@ export function gerarDanfeSimples(input: NotaSimpleInput) {
   content.push(field(x + 186, 686, 122, 52, 'DANFE', `Documento Auxiliar da Nota Fiscal Eletronica\n0-Entrada 1-Saida: 1\nNo ${nota.numero} Serie ${nota.serie}`, 7))
   content.push(field(x + 308, 686, 231, 52, 'CONTROLE DO FISCO / CHAVE DE ACESSO', `${chaveAcesso.replace(/(\d{4})(?=\d)/g, '$1 ')}\nPREVIA SEM AUTORIZACAO SEFAZ`, 7))
 
-  content.push(field(x, 656, 270, 24, 'NATUREZA DA OPERACAO', 'VENDA DE MERCADORIA', 8))
+  content.push(field(x, 656, 270, 24, 'NATUREZA DA OPERACAO', natureza?.natureza || 'VENDA DE MERCADORIA', 8))
   content.push(field(x + 270, 656, 269, 24, 'PROTOCOLO DE AUTORIZACAO DE USO', protocolo.startsWith('LOCAL') ? 'Pendente de envio SEFAZ' : protocolo, 8))
   content.push(field(x, 628, 180, 24, 'INSCRICAO ESTADUAL', empresa.ie || '-', 8))
   content.push(field(x + 180, 628, 180, 24, 'INSCR. EST. SUBST. TRIB.', '-', 8))
@@ -479,14 +501,14 @@ export function gerarDanfeSimples(input: NotaSimpleInput) {
   content.push(pdfText(x + 4, 408, 7, produto?.codigo_interno || 'ITEM-1'))
   content.push(pdfText(x + 58, 408, 7, short(nota.descricao, 46)))
   content.push(pdfText(x + 260, 408, 7, digits(produto?.ncm).padStart(8, '0').slice(0, 8)))
-  content.push(pdfText(x + 315, 408, 7, digits(produto?.cfop || '5102').padStart(4, '0').slice(0, 4)))
+  content.push(pdfText(x + 315, 408, 7, digits(produto?.cfop || natureza?.cfop_padrao || '5102').padStart(4, '0').slice(0, 4)))
   content.push(pdfText(x + 355, 408, 7, produto?.unidade || 'UN'))
   content.push(pdfText(x + 390, 408, 7, dec(quantidade, 2)))
   content.push(pdfText(x + 435, 408, 7, dec(valorUnitario, 2)))
   content.push(pdfText(x + 490, 408, 7, dec(valorProduto, 2)))
 
   content.push(pdfText(x, 338, 8, 'DADOS ADICIONAIS', { bold: true }))
-  content.push(field(x, 250, 330, 84, 'INFORMACOES COMPLEMENTARES', `PRE-NF-e para conferencia, sem validade fiscal. ${avisos.join(' ')}`, 7))
+  content.push(field(x, 250, 330, 84, 'INFORMACOES COMPLEMENTARES', `PRE-NF-e para conferencia, sem validade fiscal. ${natureza?.informacoes_adicionais || ''} ${avisos.join(' ')}`, 7))
   content.push(field(x + 330, 250, 209, 84, 'RESERVADO AO FISCO', 'Aguardando assinatura digital, transmissao e autorizacao SEFAZ.', 7))
 
   content.push(pdfText(x, 232, 7, 'Etapas pendentes para validade fiscal: assinatura XML com certificado A1, envio ao webservice SEFAZ, retorno autorizado e protocolo de uso.'))

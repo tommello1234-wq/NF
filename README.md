@@ -26,6 +26,7 @@ nfe-api/
   - `005_config_fiscal.sql`
   - `006_clientes.sql`
   - `007_produtos.sql`
+  - `008_naturezas_operacao.sql`
 - Settings → Auth → criar um usuário (e-mail+senha) pra acessar o admin
 
 ### 2. Rodar o backend

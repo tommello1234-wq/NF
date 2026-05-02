@@ -9,6 +9,7 @@ const emitirSchema = z.object({
   empresa_id: z.string().uuid(),
   tipo: z.enum(['nfe', 'nfce']).default('nfe'),
   serie: z.coerce.number().int().min(1).max(999).optional(),
+  natureza_operacao_id: z.string().uuid().optional().nullable(),
   cliente_id: z.string().uuid().optional().nullable(),
   produto_id: z.string().uuid().optional().nullable(),
   destinatario_nome: z.string().min(1),
@@ -104,6 +105,7 @@ export async function adminNotasRoutes(app: FastifyInstance) {
     let body = parsed.data
     let clienteSelecionado: Record<string, any> | null = null
     let produtoSelecionado: Record<string, any> | null = null
+    let naturezaSelecionada: Record<string, any> | null = null
     const [{ data: empresa, error: empresaError }, cert] = await Promise.all([
       supabase.from('empresas').select('*').eq('id', body.empresa_id).maybeSingle(),
       statusCertificado(body.empresa_id),
@@ -151,6 +153,18 @@ export async function adminNotasRoutes(app: FastifyInstance) {
       }
     }
 
+    if (body.natureza_operacao_id) {
+      const { data: natureza, error } = await supabase
+        .from('naturezas_operacao')
+        .select('*')
+        .eq('id', body.natureza_operacao_id)
+        .eq('empresa_id', body.empresa_id)
+        .maybeSingle()
+      if (error) return reply.status(500).send({ error: error.message })
+      if (!natureza) return reply.status(404).send({ error: 'Natureza de operacao nao encontrada' })
+      naturezaSelecionada = natureza
+    }
+
     await ensureBucket('notas-xml', ['application/xml', 'text/xml'])
     await ensureBucket('notas-danfe', ['application/pdf'])
 
@@ -173,6 +187,7 @@ export async function adminNotasRoutes(app: FastifyInstance) {
       empresa,
       cliente: clienteSelecionado,
       produto: produtoSelecionado,
+      natureza: naturezaSelecionada,
       nota: {
         tipo: body.tipo,
         numero,

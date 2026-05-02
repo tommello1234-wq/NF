@@ -134,6 +134,28 @@ Payload mínimo pra criar:
 - `POST /admin/empresas/:id/certificado` (multipart: pfx + senha)
 - `DELETE /admin/empresas/:id/certificado`
 
+### Naturezas de operacao
+
+- `GET /admin/naturezas-operacao?empresa_id=<uuid>`
+- `POST /admin/naturezas-operacao`
+- `PATCH /admin/naturezas-operacao/:id`
+- `DELETE /admin/naturezas-operacao/:id`
+
+```json
+{
+  "empresa_id": "uuid-da-empresa",
+  "nome": "Venda dentro do estado",
+  "natureza": "VENDA DE MERCADORIA",
+  "tipo_operacao": "saida",
+  "finalidade": "normal",
+  "cfop_padrao": "5102",
+  "consumidor_final": true,
+  "indicador_presenca": 9,
+  "modalidade_frete": 9,
+  "informacoes_adicionais": "Operacao em homologacao"
+}
+```
+
 ### DARF comum
 
 - `POST /admin/darfs/gerar` gera um PDF preenchido com os campos do DARF comum.
