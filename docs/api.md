@@ -134,6 +134,26 @@ Payload mínimo pra criar:
 - `POST /admin/empresas/:id/certificado` (multipart: pfx + senha)
 - `DELETE /admin/empresas/:id/certificado`
 
+### DARF comum
+
+- `POST /admin/darfs/gerar` gera um PDF preenchido com os campos do DARF comum.
+
+```json
+{
+  "empresa_id": "uuid-da-empresa",
+  "nome_telefone": "EMPRESA LTDA / (00) 0000-0000",
+  "periodo_apuracao": "30/04/2026",
+  "codigo_receita": "0000",
+  "numero_referencia": "",
+  "data_vencimento": "20/05/2026",
+  "valor_principal": 100,
+  "valor_multa": 0,
+  "valor_juros": 0
+}
+```
+
+Resposta: `application/pdf`. Para DARF numerado com codigo de barras/PIX, use o servico oficial da Receita/SicalcWeb.
+
 ---
 
 ## Códigos de erro

@@ -47,6 +47,16 @@ export async function apiDownload(path: string): Promise<Blob> {
   return res.blob()
 }
 
+export async function apiPostDownload(path: string, body?: unknown): Promise<Blob> {
+  const res = await fetch(`${API_URL}${path}`, {
+    method: 'POST',
+    headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  })
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`)
+  return res.blob()
+}
+
 export async function apiUpload(path: string, formData: FormData): Promise<unknown> {
   const res = await fetch(`${API_URL}${path}`, {
     method: 'POST',

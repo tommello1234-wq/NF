@@ -61,6 +61,7 @@ O deploy já está configurado por:
 - `package.json` na raiz com workspaces `admin` e `server`
 - `vercel.json`, com `outputDirectory` em `admin/dist` e rewrite de `/api/*`
 - `api/index.ts`, que adapta a API Fastify para Vercel Functions
+- Tela `DARF`, que gera PDF do DARF comum preenchido para teste operacional. DARF numerado com codigo de barras/PIX continua sendo emitido pelo servico oficial da Receita/SicalcWeb.
 
 Variaveis para configurar na Vercel:
 
