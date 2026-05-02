@@ -17,6 +17,8 @@ type NotaSimpleInput = {
     destinatario_nome: string
     destinatario_cpf_cnpj: string
     descricao: string
+    quantidade?: number
+    valor_unitario?: number
     valor_total: number
   }
   chaveAcesso: string
@@ -96,8 +98,8 @@ export function gerarXmlSimples({ empresa, nota, chaveAcesso, protocolo }: NotaS
   <itens>
     <item numero="1">
       <descricao>${xmlEscape(nota.descricao)}</descricao>
-      <quantidade>1</quantidade>
-      <valorUnitario>${xmlEscape(nota.valor_total.toFixed(2))}</valorUnitario>
+      <quantidade>${xmlEscape((nota.quantidade || 1).toFixed(2))}</quantidade>
+      <valorUnitario>${xmlEscape((nota.valor_unitario || nota.valor_total).toFixed(2))}</valorUnitario>
       <valorTotal>${xmlEscape(nota.valor_total.toFixed(2))}</valorTotal>
     </item>
   </itens>
@@ -121,6 +123,8 @@ export function gerarDanfeSimples({ empresa, nota, chaveAcesso, protocolo }: Not
     `CNPJ: ${digits(empresa.cnpj)}`,
     `Destinatario: ${nota.destinatario_nome}`,
     `Descricao: ${nota.descricao}`,
+    `Quantidade: ${(nota.quantidade || 1).toFixed(2)}`,
+    `Valor unitario: R$ ${(nota.valor_unitario || nota.valor_total).toFixed(2)}`,
     `Valor total: R$ ${nota.valor_total.toFixed(2)}`,
   ]
 

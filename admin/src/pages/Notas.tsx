@@ -8,6 +8,22 @@ interface Empresa {
   nome: string
   razao_social: string
   cnpj: string
+  serie_nfe?: number
+  serie_nfce?: number
+}
+
+interface Cliente {
+  id: string
+  nome: string
+  cpf_cnpj: string
+  ativo: boolean
+}
+
+interface Produto {
+  id: string
+  descricao: string
+  valor_unitario: string | number | null
+  ativo: boolean
 }
 
 interface Nota {
@@ -54,16 +70,22 @@ function downloadBlob(blob: Blob, filename: string) {
 
 export default function Notas() {
   const [empresas, setEmpresas] = useState<Empresa[]>([])
+  const [clientes, setClientes] = useState<Cliente[]>([])
+  const [produtos, setProdutos] = useState<Produto[]>([])
   const [notas, setNotas] = useState<Nota[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({
     empresa_id: '',
+    cliente_id: '',
+    produto_id: '',
     tipo: 'nfe',
     serie: 1,
     destinatario_nome: 'Consumidor final',
     destinatario_cpf_cnpj: '00000000000',
     descricao: 'Prestacao de servico',
+    quantidade: 1,
+    valor_unitario: 100,
     valor_total: 100,
   })
 
@@ -76,12 +98,83 @@ export default function Notas() {
       const empresasData = await apiGet<Empresa[]>('/admin/empresas')
       setEmpresas(empresasData)
       if (empresasData[0]) {
-        setForm((current) => ({ ...current, empresa_id: empresasData[0].id }))
+        setForm((current) => ({ ...current, empresa_id: empresasData[0].id, serie: empresasData[0].serie_nfe || 1 }))
+        await loadCadastros(empresasData[0].id)
       }
       await loadNotas()
     } catch (err) {
       toast.error('Erro ao carregar notas', { description: (err as Error).message })
     }
+  }
+
+  async function loadCadastros(empresaId: string) {
+    const [clientesData, produtosData] = await Promise.all([
+      apiGet<Cliente[]>(`/admin/clientes?empresa_id=${empresaId}&ativo=true`).catch(() => []),
+      apiGet<Produto[]>(`/admin/produtos?empresa_id=${empresaId}&ativo=true`).catch(() => []),
+    ])
+    setClientes(clientesData)
+    setProdutos(produtosData)
+  }
+
+  async function changeEmpresa(empresaId: string) {
+    const empresa = empresas.find((item) => item.id === empresaId)
+    setForm((current) => ({
+      ...current,
+      empresa_id: empresaId,
+      cliente_id: '',
+      produto_id: '',
+      serie: current.tipo === 'nfce' ? empresa?.serie_nfce || 1 : empresa?.serie_nfe || 1,
+    }))
+    if (empresaId) await loadCadastros(empresaId)
+  }
+
+  function changeTipo(tipo: string) {
+    const empresa = empresas.find((item) => item.id === form.empresa_id)
+    setForm((current) => ({
+      ...current,
+      tipo,
+      serie: tipo === 'nfce' ? empresa?.serie_nfce || 1 : empresa?.serie_nfe || 1,
+    }))
+  }
+
+  function changeCliente(clienteId: string) {
+    const cliente = clientes.find((item) => item.id === clienteId)
+    setForm((current) => ({
+      ...current,
+      cliente_id: clienteId,
+      destinatario_nome: cliente?.nome || current.destinatario_nome,
+      destinatario_cpf_cnpj: cliente?.cpf_cnpj || current.destinatario_cpf_cnpj,
+    }))
+  }
+
+  function changeProduto(produtoId: string) {
+    const produto = produtos.find((item) => item.id === produtoId)
+    const valorUnitario = Number(produto?.valor_unitario || form.valor_unitario || 0)
+    setForm((current) => ({
+      ...current,
+      produto_id: produtoId,
+      descricao: produto?.descricao || current.descricao,
+      valor_unitario: valorUnitario,
+      valor_total: valorUnitario * Number(current.quantidade || 1),
+    }))
+  }
+
+  function changeQuantidade(value: number) {
+    const quantidade = Number(value || 1)
+    setForm((current) => ({
+      ...current,
+      quantidade,
+      valor_total: quantidade * Number(current.valor_unitario || 0),
+    }))
+  }
+
+  function changeValorUnitario(value: number) {
+    const valorUnitario = Number(value || 0)
+    setForm((current) => ({
+      ...current,
+      valor_unitario: valorUnitario,
+      valor_total: valorUnitario * Number(current.quantidade || 1),
+    }))
   }
 
   async function loadNotas() {
@@ -111,7 +204,11 @@ export default function Notas() {
         ...form,
         destinatario_cpf_cnpj: onlyDigits(form.destinatario_cpf_cnpj),
         valor_total: Number(form.valor_total),
+        valor_unitario: Number(form.valor_unitario),
+        quantidade: Number(form.quantidade),
         serie: Number(form.serie),
+        cliente_id: form.cliente_id || null,
+        produto_id: form.produto_id || null,
       })
       toast.success('Nota simples gerada', { description: nota.aviso || undefined })
       await loadNotas()
@@ -166,7 +263,7 @@ export default function Notas() {
             <select
               className={input}
               value={form.empresa_id}
-              onChange={(event) => setForm((current) => ({ ...current, empresa_id: event.target.value }))}
+              onChange={(event) => changeEmpresa(event.target.value)}
             >
               <option value="">Selecione</option>
               {empresas.map((empresa) => (
@@ -181,7 +278,7 @@ export default function Notas() {
             <select
               className={input}
               value={form.tipo}
-              onChange={(event) => setForm((current) => ({ ...current, tipo: event.target.value }))}
+              onChange={(event) => changeTipo(event.target.value)}
             >
               <option value="nfe">NF-e</option>
               <option value="nfce">NFC-e</option>
@@ -198,6 +295,32 @@ export default function Notas() {
             />
           </div>
           <div className="xl:col-span-2">
+            <label className={label}>Cliente cadastrado</label>
+            <select
+              className={input}
+              value={form.cliente_id}
+              onChange={(event) => changeCliente(event.target.value)}
+            >
+              <option value="">Preencher manualmente</option>
+              {clientes.map((cliente) => (
+                <option key={cliente.id} value={cliente.id}>{cliente.nome}</option>
+              ))}
+            </select>
+          </div>
+          <div className="xl:col-span-2">
+            <label className={label}>Produto/servico cadastrado</label>
+            <select
+              className={input}
+              value={form.produto_id}
+              onChange={(event) => changeProduto(event.target.value)}
+            >
+              <option value="">Preencher manualmente</option>
+              {produtos.map((produto) => (
+                <option key={produto.id} value={produto.id}>{produto.descricao}</option>
+              ))}
+            </select>
+          </div>
+          <div className="xl:col-span-2">
             <label className={label}>Destinatario</label>
             <input
               className={input}
@@ -211,6 +334,28 @@ export default function Notas() {
               className={input}
               value={form.destinatario_cpf_cnpj}
               onChange={(event) => setForm((current) => ({ ...current, destinatario_cpf_cnpj: event.target.value }))}
+            />
+          </div>
+          <div>
+            <label className={label}>Quantidade</label>
+            <input
+              className={input}
+              type="number"
+              step="0.01"
+              min="0.01"
+              value={form.quantidade}
+              onChange={(event) => changeQuantidade(Number(event.target.value))}
+            />
+          </div>
+          <div>
+            <label className={label}>Valor unitario</label>
+            <input
+              className={input}
+              type="number"
+              step="0.01"
+              min="0.01"
+              value={form.valor_unitario}
+              onChange={(event) => changeValorUnitario(Number(event.target.value))}
             />
           </div>
           <div>

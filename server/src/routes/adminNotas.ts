@@ -8,10 +8,14 @@ import { gerarChaveAcesso, gerarDanfeSimples, gerarXmlSimples } from '../service
 const emitirSchema = z.object({
   empresa_id: z.string().uuid(),
   tipo: z.enum(['nfe', 'nfce']).default('nfe'),
-  serie: z.coerce.number().int().min(1).max(999).default(1),
+  serie: z.coerce.number().int().min(1).max(999).optional(),
+  cliente_id: z.string().uuid().optional().nullable(),
+  produto_id: z.string().uuid().optional().nullable(),
   destinatario_nome: z.string().min(1),
   destinatario_cpf_cnpj: z.string().min(3),
   descricao: z.string().min(1).max(500),
+  quantidade: z.coerce.number().positive().default(1),
+  valor_unitario: z.coerce.number().positive().optional(),
   valor_total: z.coerce.number().positive(),
 })
 
@@ -35,11 +39,14 @@ async function ensureBucket(id: string, mimeTypes: string[]) {
   }
 }
 
-async function nextNumero(empresaId: string, tipo: 'nfe' | 'nfce', serie: number) {
+async function nextNumero(empresa: Record<string, any>, tipo: 'nfe' | 'nfce', serie: number) {
+  const configured = tipo === 'nfce' ? empresa.proximo_numero_nfce : empresa.proximo_numero_nfe
+  if (configured && Number(configured) > 0) return Number(configured)
+
   const { data } = await supabase
     .from('notas_fiscais')
     .select('numero')
-    .eq('empresa_id', empresaId)
+    .eq('empresa_id', empresa.id)
     .eq('tipo', tipo)
     .eq('serie', serie)
     .order('numero', { ascending: false })
@@ -47,6 +54,15 @@ async function nextNumero(empresaId: string, tipo: 'nfe' | 'nfce', serie: number
     .maybeSingle()
 
   return Number(data?.numero || 0) + 1
+}
+
+async function updateNextNumero(empresaId: string, tipo: 'nfe' | 'nfce', numero: number) {
+  const column = tipo === 'nfce' ? 'proximo_numero_nfce' : 'proximo_numero_nfe'
+  await supabase
+    .from('empresas')
+    .update({ [column]: numero + 1 })
+    .eq('id', empresaId)
+    .then(() => { /* ignore compatibility errors when migration is not applied */ }, () => { /* ignore */ })
 }
 
 async function downloadFile(bucket: string, path: string, reply: any, contentType: string, filename: string) {
@@ -85,7 +101,7 @@ export async function adminNotasRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: 'Payload invalido', details: parsed.error.flatten() })
     }
 
-    const body = parsed.data
+    let body = parsed.data
     const [{ data: empresa, error: empresaError }, cert] = await Promise.all([
       supabase.from('empresas').select('*').eq('id', body.empresa_id).maybeSingle(),
       statusCertificado(body.empresa_id),
@@ -96,16 +112,52 @@ export async function adminNotasRoutes(app: FastifyInstance) {
     if (!cert) return reply.status(400).send({ error: 'Cadastre o certificado digital antes de gerar nota' })
     if (cert.status === 'vencido') return reply.status(400).send({ error: 'Certificado digital vencido' })
 
+    if (body.cliente_id) {
+      const { data: cliente, error } = await supabase
+        .from('clientes')
+        .select('*')
+        .eq('id', body.cliente_id)
+        .eq('empresa_id', body.empresa_id)
+        .maybeSingle()
+      if (error) return reply.status(500).send({ error: error.message })
+      if (!cliente) return reply.status(404).send({ error: 'Cliente nao encontrado' })
+      body = {
+        ...body,
+        destinatario_nome: cliente.nome,
+        destinatario_cpf_cnpj: cliente.cpf_cnpj,
+      }
+    }
+
+    if (body.produto_id) {
+      const { data: produto, error } = await supabase
+        .from('produtos')
+        .select('*')
+        .eq('id', body.produto_id)
+        .eq('empresa_id', body.empresa_id)
+        .maybeSingle()
+      if (error) return reply.status(500).send({ error: error.message })
+      if (!produto) return reply.status(404).send({ error: 'Produto/servico nao encontrado' })
+      const valorUnitario = body.valor_unitario || Number(produto.valor_unitario || 0)
+      const quantidade = Number(body.quantidade || 1)
+      body = {
+        ...body,
+        descricao: produto.descricao,
+        valor_unitario: valorUnitario,
+        valor_total: valorUnitario * quantidade,
+      }
+    }
+
     await ensureBucket('notas-xml', ['application/xml', 'text/xml'])
     await ensureBucket('notas-danfe', ['application/pdf'])
 
-    const numero = await nextNumero(body.empresa_id, body.tipo, body.serie)
+    const serie = body.serie || Number(body.tipo === 'nfce' ? empresa.serie_nfce : empresa.serie_nfe) || 1
+    const numero = await nextNumero(empresa, body.tipo, serie)
     const modelo = body.tipo === 'nfce' ? '65' : '55'
     const chaveAcesso = gerarChaveAcesso({
       ufCodigo: empresa.endereco_codigo_ibge,
       cnpj: empresa.cnpj,
       modelo,
-      serie: body.serie,
+      serie,
       numero,
     })
     const protocolo = `LOCAL${Date.now()}`
@@ -118,10 +170,12 @@ export async function adminNotasRoutes(app: FastifyInstance) {
       nota: {
         tipo: body.tipo,
         numero,
-        serie: body.serie,
+        serie,
         destinatario_nome: body.destinatario_nome,
         destinatario_cpf_cnpj: cleanDoc(body.destinatario_cpf_cnpj),
         descricao: body.descricao,
+        quantidade: body.quantidade,
+        valor_unitario: body.valor_unitario || body.valor_total,
         valor_total: body.valor_total,
       },
       chaveAcesso,
@@ -141,31 +195,46 @@ export async function adminNotasRoutes(app: FastifyInstance) {
       .upload(danfePath, pdf, { contentType: 'application/pdf', upsert: true })
     if (pdfError) return reply.status(500).send({ error: pdfError.message })
 
-    const { data: nota, error: notaError } = await supabase
+    const notaPayload = {
+      empresa_id: body.empresa_id,
+      tipo: body.tipo,
+      numero,
+      serie,
+      chave_acesso: chaveAcesso,
+      protocolo,
+      status: 'emitida_teste',
+      xml_path: xmlPath,
+      danfe_path: danfePath,
+      destinatario_nome: body.destinatario_nome,
+      destinatario_cpf_cnpj: cleanDoc(body.destinatario_cpf_cnpj),
+      valor_total: body.valor_total,
+      payload_original: {
+        ...body,
+        serie,
+        aviso: 'Documento simplificado para teste operacional. Nao possui validade fiscal.',
+      },
+      emitida_em: new Date().toISOString(),
+    }
+
+    let { data: nota, error: notaError } = await supabase
       .from('notas_fiscais')
-      .insert({
-        empresa_id: body.empresa_id,
-        tipo: body.tipo,
-        numero,
-        serie: body.serie,
-        chave_acesso: chaveAcesso,
-        protocolo,
-        status: 'autorizada',
-        xml_path: xmlPath,
-        danfe_path: danfePath,
-        destinatario_nome: body.destinatario_nome,
-        destinatario_cpf_cnpj: cleanDoc(body.destinatario_cpf_cnpj),
-        valor_total: body.valor_total,
-        payload_original: {
-          ...body,
-          aviso: 'Documento simplificado para teste operacional. Nao possui validade fiscal.',
-        },
-        emitida_em: new Date().toISOString(),
-      })
+      .insert(notaPayload)
       .select()
       .single()
 
+    if (notaError && notaError.message.toLowerCase().includes('status')) {
+      const fallback = { ...notaPayload, status: 'autorizada' }
+      const retry = await supabase
+        .from('notas_fiscais')
+        .insert(fallback)
+        .select()
+        .single()
+      nota = retry.data
+      notaError = retry.error
+    }
+
     if (notaError) return reply.status(500).send({ error: notaError.message })
+    await updateNextNumero(body.empresa_id, body.tipo, numero)
 
     return reply.status(201).send({
       ...nota,

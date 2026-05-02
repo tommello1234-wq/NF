@@ -13,6 +13,7 @@ interface Empresa {
   endereco_cidade: string | null
   regime_tributario: string | null
   ambiente_sefaz: number
+  status_fiscal?: string
   ativo: boolean
   created_at: string
 }
@@ -124,15 +125,16 @@ export default function Empresas() {
               <th className="px-4 py-3 text-left text-[11px] uppercase text-muted">CNPJ</th>
               <th className="px-4 py-3 text-left text-[11px] uppercase text-muted">Cidade/UF</th>
               <th className="px-4 py-3 text-left text-[11px] uppercase text-muted">Regime</th>
+              <th className="px-4 py-3 text-left text-[11px] uppercase text-muted">Fiscal</th>
               <th className="px-4 py-3 text-center text-[11px] uppercase text-muted">Ambiente</th>
               <th className="px-4 py-3"></th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-muted">Carregando...</td></tr>
+              <tr><td colSpan={7} className="px-4 py-8 text-center text-muted">Carregando...</td></tr>
             ) : list.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-12 text-center text-muted">Nenhuma empresa cadastrada.</td></tr>
+              <tr><td colSpan={7} className="px-4 py-12 text-center text-muted">Nenhuma empresa cadastrada.</td></tr>
             ) : list.map((e) => (
               <tr key={e.id} className="border-b border-black/[0.04] hover:bg-light-secondary">
                 <td className="px-4 py-3">
@@ -144,6 +146,15 @@ export default function Empresas() {
                   {e.endereco_cidade ? `${e.endereco_cidade}/${e.endereco_uf}` : '—'}
                 </td>
                 <td className="px-4 py-3 text-muted-dark capitalize">{e.regime_tributario || '—'}</td>
+                <td className="px-4 py-3">
+                  <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                    e.status_fiscal === 'pronta_producao' || e.status_fiscal === 'pronta_homologacao'
+                      ? 'bg-success-bg text-success'
+                      : 'bg-warning-bg text-warning'
+                  }`}>
+                    {e.status_fiscal || 'incompleta'}
+                  </span>
+                </td>
                 <td className="px-4 py-3 text-center">
                   <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${
                     e.ambiente_sefaz === 1 ? 'bg-error-bg text-error' : 'bg-info-bg text-info'
