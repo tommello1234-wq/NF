@@ -1,0 +1,7 @@
+api/
+supabase/
+docs/
+.github/
+admin/node_modules/
+admin/dist/
+admin/*.tsbuildinfo

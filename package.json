@@ -1,0 +1,12 @@
+{
+  "name": "notas-washi",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "install:admin": "npm ci --prefix admin",
+    "build": "npm run build --prefix admin"
+  },
+  "engines": {
+    "node": "22.x"
+  }
+}

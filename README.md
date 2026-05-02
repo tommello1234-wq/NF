@@ -51,6 +51,27 @@ Abre: http://localhost:5174
 
 ## Deploy (VPS)
 
+## Deploy do painel na Vercel
+
+Este repositório é um monorepo. A Vercel deve publicar somente o painel React em `admin/`.
+
+O deploy já está configurado por:
+
+- `package.json` na raiz, delegando install/build para `admin`
+- `vercel.json`, com `outputDirectory` em `admin/dist`
+- `.vercelignore`, evitando que o backend Fastify seja tratado como Functions da Vercel
+
+Variáveis opcionais na Vercel:
+
+```env
+VITE_SUPABASE_URL=https://yfkkitbnlvbfzgbxyhmn.supabase.co
+VITE_SUPABASE_ANON_KEY=sb_publishable_jCbn5xTva79AUdpUydpkKg_k7XajKt0
+VITE_API_URL=https://api.siteteste.store
+```
+
+Se `VITE_API_URL` não for configurada, o build de produção usa `https://api.siteteste.store`.
+Para o painel funcionar depois do login, a API precisa estar pública nesse endereço ou em outro valor configurado em `VITE_API_URL`.
+
 ### Primeira vez
 
 ```bash
