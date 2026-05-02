@@ -6,6 +6,7 @@ import { healthRoutes } from './routes/health.js'
 import { certificadoRoutes } from './routes/certificado.js'
 import { nfeRoutes } from './routes/nfe.js'
 import { adminEmpresasRoutes } from './routes/adminEmpresas.js'
+import { adminNotasRoutes } from './routes/adminNotas.js'
 
 async function main() {
   const app = Fastify({
@@ -39,6 +40,7 @@ async function main() {
 
   // Rotas admin (auth: JWT Supabase Auth)
   await app.register(adminEmpresasRoutes, { prefix: '/admin' })
+  await app.register(adminNotasRoutes, { prefix: '/admin' })
 
   try {
     await app.listen({ port: config.port, host: '0.0.0.0' })

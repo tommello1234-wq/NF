@@ -41,6 +41,12 @@ export async function apiDelete(path: string): Promise<void> {
   if (!res.ok && res.status !== 204) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`)
 }
 
+export async function apiDownload(path: string): Promise<Blob> {
+  const res = await fetch(`${API_URL}${path}`, { headers: await authHeaders() })
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`)
+  return res.blob()
+}
+
 export async function apiUpload(path: string, formData: FormData): Promise<unknown> {
   const res = await fetch(`${API_URL}${path}`, {
     method: 'POST',

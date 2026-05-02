@@ -1,0 +1,197 @@
+import { FastifyInstance } from 'fastify'
+import { z } from 'zod'
+import { authAdmin } from '../middleware/authAdmin.js'
+import { supabase } from '../services/supabase.js'
+import { statusCertificado } from '../services/certificado.js'
+import { gerarChaveAcesso, gerarDanfeSimples, gerarXmlSimples } from '../services/notaSimples.js'
+
+const emitirSchema = z.object({
+  empresa_id: z.string().uuid(),
+  tipo: z.enum(['nfe', 'nfce']).default('nfe'),
+  serie: z.coerce.number().int().min(1).max(999).default(1),
+  destinatario_nome: z.string().min(1),
+  destinatario_cpf_cnpj: z.string().min(3),
+  descricao: z.string().min(1).max(500),
+  valor_total: z.coerce.number().positive(),
+})
+
+const querySchema = z.object({
+  empresa_id: z.string().uuid().optional(),
+  status: z.string().optional(),
+})
+
+function cleanDoc(value: string) {
+  return value.replace(/\D/g, '')
+}
+
+async function ensureBucket(id: string, mimeTypes: string[]) {
+  const { error } = await supabase.storage.createBucket(id, {
+    public: false,
+    fileSizeLimit: 10 * 1024 * 1024,
+    allowedMimeTypes: mimeTypes,
+  })
+  if (error && !error.message.toLowerCase().includes('already exists')) {
+    throw new Error(error.message)
+  }
+}
+
+async function nextNumero(empresaId: string, tipo: 'nfe' | 'nfce', serie: number) {
+  const { data } = await supabase
+    .from('notas_fiscais')
+    .select('numero')
+    .eq('empresa_id', empresaId)
+    .eq('tipo', tipo)
+    .eq('serie', serie)
+    .order('numero', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  return Number(data?.numero || 0) + 1
+}
+
+async function downloadFile(bucket: string, path: string, reply: any, contentType: string, filename: string) {
+  const { data, error } = await supabase.storage.from(bucket).download(path)
+  if (error || !data) return reply.status(404).send({ error: error?.message || 'Arquivo nao encontrado' })
+  const buffer = Buffer.from(await data.arrayBuffer())
+  return reply
+    .header('Content-Type', contentType)
+    .header('Content-Disposition', `attachment; filename="${filename}"`)
+    .send(buffer)
+}
+
+export async function adminNotasRoutes(app: FastifyInstance) {
+  app.addHook('preHandler', authAdmin)
+
+  app.get('/notas', async (req, reply) => {
+    const parsed = querySchema.safeParse(req.query)
+    if (!parsed.success) return reply.status(400).send({ error: 'Query invalida' })
+
+    let query = supabase
+      .from('notas_fiscais')
+      .select('*, empresas(nome, razao_social, cnpj)')
+      .order('created_at', { ascending: false })
+
+    if (parsed.data.empresa_id) query = query.eq('empresa_id', parsed.data.empresa_id)
+    if (parsed.data.status) query = query.eq('status', parsed.data.status)
+
+    const { data, error } = await query
+    if (error) return reply.status(500).send({ error: error.message })
+    return data || []
+  })
+
+  app.post('/notas/emitir-simples', async (req, reply) => {
+    const parsed = emitirSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'Payload invalido', details: parsed.error.flatten() })
+    }
+
+    const body = parsed.data
+    const [{ data: empresa, error: empresaError }, cert] = await Promise.all([
+      supabase.from('empresas').select('*').eq('id', body.empresa_id).maybeSingle(),
+      statusCertificado(body.empresa_id),
+    ])
+
+    if (empresaError) return reply.status(500).send({ error: empresaError.message })
+    if (!empresa) return reply.status(404).send({ error: 'Empresa nao encontrada' })
+    if (!cert) return reply.status(400).send({ error: 'Cadastre o certificado digital antes de gerar nota' })
+    if (cert.status === 'vencido') return reply.status(400).send({ error: 'Certificado digital vencido' })
+
+    await ensureBucket('notas-xml', ['application/xml', 'text/xml'])
+    await ensureBucket('notas-danfe', ['application/pdf'])
+
+    const numero = await nextNumero(body.empresa_id, body.tipo, body.serie)
+    const modelo = body.tipo === 'nfce' ? '65' : '55'
+    const chaveAcesso = gerarChaveAcesso({
+      ufCodigo: empresa.endereco_codigo_ibge,
+      cnpj: empresa.cnpj,
+      modelo,
+      serie: body.serie,
+      numero,
+    })
+    const protocolo = `LOCAL${Date.now()}`
+    const storageBase = `${body.empresa_id}/${chaveAcesso}`
+    const xmlPath = `${storageBase}/nota-${chaveAcesso}.xml`
+    const danfePath = `${storageBase}/danfe-${chaveAcesso}.pdf`
+
+    const input = {
+      empresa,
+      nota: {
+        tipo: body.tipo,
+        numero,
+        serie: body.serie,
+        destinatario_nome: body.destinatario_nome,
+        destinatario_cpf_cnpj: cleanDoc(body.destinatario_cpf_cnpj),
+        descricao: body.descricao,
+        valor_total: body.valor_total,
+      },
+      chaveAcesso,
+      protocolo,
+    }
+
+    const xml = gerarXmlSimples(input)
+    const pdf = gerarDanfeSimples(input)
+
+    const { error: xmlError } = await supabase.storage
+      .from('notas-xml')
+      .upload(xmlPath, Buffer.from(xml, 'utf8'), { contentType: 'application/xml', upsert: true })
+    if (xmlError) return reply.status(500).send({ error: xmlError.message })
+
+    const { error: pdfError } = await supabase.storage
+      .from('notas-danfe')
+      .upload(danfePath, pdf, { contentType: 'application/pdf', upsert: true })
+    if (pdfError) return reply.status(500).send({ error: pdfError.message })
+
+    const { data: nota, error: notaError } = await supabase
+      .from('notas_fiscais')
+      .insert({
+        empresa_id: body.empresa_id,
+        tipo: body.tipo,
+        numero,
+        serie: body.serie,
+        chave_acesso: chaveAcesso,
+        protocolo,
+        status: 'autorizada',
+        xml_path: xmlPath,
+        danfe_path: danfePath,
+        destinatario_nome: body.destinatario_nome,
+        destinatario_cpf_cnpj: cleanDoc(body.destinatario_cpf_cnpj),
+        valor_total: body.valor_total,
+        payload_original: {
+          ...body,
+          aviso: 'Documento simplificado para teste operacional. Nao possui validade fiscal.',
+        },
+        emitida_em: new Date().toISOString(),
+      })
+      .select()
+      .single()
+
+    if (notaError) return reply.status(500).send({ error: notaError.message })
+
+    return reply.status(201).send({
+      ...nota,
+      aviso: 'Nota simples gerada localmente para teste. Sem validade fiscal e sem transmissao SEFAZ.',
+    })
+  })
+
+  app.get<{ Params: { id: string } }>('/notas/:id/xml', async (req, reply) => {
+    const { data } = await supabase
+      .from('notas_fiscais')
+      .select('xml_path, chave_acesso')
+      .eq('id', req.params.id)
+      .maybeSingle()
+
+    if (!data?.xml_path) return reply.status(404).send({ error: 'XML nao disponivel' })
+    return downloadFile('notas-xml', data.xml_path, reply, 'application/xml', `nota-${data.chave_acesso || req.params.id}.xml`)
+  })
+
+  app.get<{ Params: { id: string } }>('/notas/:id/danfe', async (req, reply) => {
+    const { data } = await supabase
+      .from('notas_fiscais')
+      .select('danfe_path, chave_acesso')
+      .eq('id', req.params.id)
+      .maybeSingle()
+
+    if (!data?.danfe_path) return reply.status(404).send({ error: 'DANFE nao disponivel' })
+    return downloadFile('notas-danfe', data.danfe_path, reply, 'application/pdf', `danfe-${data.chave_acesso || req.params.id}.pdf`)
+  })
+}
