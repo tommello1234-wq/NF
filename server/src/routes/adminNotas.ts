@@ -102,6 +102,8 @@ export async function adminNotasRoutes(app: FastifyInstance) {
     }
 
     let body = parsed.data
+    let clienteSelecionado: Record<string, any> | null = null
+    let produtoSelecionado: Record<string, any> | null = null
     const [{ data: empresa, error: empresaError }, cert] = await Promise.all([
       supabase.from('empresas').select('*').eq('id', body.empresa_id).maybeSingle(),
       statusCertificado(body.empresa_id),
@@ -121,6 +123,7 @@ export async function adminNotasRoutes(app: FastifyInstance) {
         .maybeSingle()
       if (error) return reply.status(500).send({ error: error.message })
       if (!cliente) return reply.status(404).send({ error: 'Cliente nao encontrado' })
+      clienteSelecionado = cliente
       body = {
         ...body,
         destinatario_nome: cliente.nome,
@@ -137,6 +140,7 @@ export async function adminNotasRoutes(app: FastifyInstance) {
         .maybeSingle()
       if (error) return reply.status(500).send({ error: error.message })
       if (!produto) return reply.status(404).send({ error: 'Produto/servico nao encontrado' })
+      produtoSelecionado = produto
       const valorUnitario = body.valor_unitario || Number(produto.valor_unitario || 0)
       const quantidade = Number(body.quantidade || 1)
       body = {
@@ -167,6 +171,8 @@ export async function adminNotasRoutes(app: FastifyInstance) {
 
     const input = {
       empresa,
+      cliente: clienteSelecionado,
+      produto: produtoSelecionado,
       nota: {
         tipo: body.tipo,
         numero,
@@ -211,7 +217,7 @@ export async function adminNotasRoutes(app: FastifyInstance) {
       payload_original: {
         ...body,
         serie,
-        aviso: 'Documento simplificado para teste operacional. Nao possui validade fiscal.',
+        aviso: 'Pre-NF-e gerada para conferencia. Sem assinatura digital, sem transmissao SEFAZ e sem validade fiscal.',
       },
       emitida_em: new Date().toISOString(),
     }
@@ -238,7 +244,7 @@ export async function adminNotasRoutes(app: FastifyInstance) {
 
     return reply.status(201).send({
       ...nota,
-      aviso: 'Nota simples gerada localmente para teste. Sem validade fiscal e sem transmissao SEFAZ.',
+      aviso: 'Pre-NF-e e DANFE de conferencia gerados. Ainda falta assinatura digital e transmissao SEFAZ para validade fiscal.',
     })
   })
 

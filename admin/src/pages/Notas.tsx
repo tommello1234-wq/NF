@@ -22,6 +22,14 @@ interface Cliente {
 interface Produto {
   id: string
   descricao: string
+  codigo_interno?: string | null
+  ncm?: string | null
+  cfop?: string | null
+  unidade?: string | null
+  cst_csosn?: string | null
+  aliquota_icms?: string | number | null
+  aliquota_pis?: string | number | null
+  aliquota_cofins?: string | number | null
   valor_unitario: string | number | null
   ativo: boolean
 }
@@ -210,10 +218,10 @@ export default function Notas() {
         cliente_id: form.cliente_id || null,
         produto_id: form.produto_id || null,
       })
-      toast.success('Nota simples gerada', { description: nota.aviso || undefined })
+      toast.success('Pre-NF-e gerada', { description: nota.aviso || undefined })
       await loadNotas()
     } catch (err) {
-      toast.error('Erro ao gerar nota', { description: (err as Error).message })
+      toast.error('Erro ao gerar pre-NF-e', { description: (err as Error).message })
     } finally {
       setSaving(false)
     }
@@ -240,8 +248,8 @@ export default function Notas() {
             <FileText size={20} className="text-accent" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-dark">Notas fiscais simples</h1>
-            <p className="text-sm text-muted">Geracao operacional com XML e DANFE para teste local</p>
+            <h1 className="text-2xl font-bold text-dark">Pre-NF-e</h1>
+            <p className="text-sm text-muted">XML 4.00 e DANFE de conferencia antes da transmissao SEFAZ</p>
           </div>
         </div>
         <button
@@ -255,7 +263,7 @@ export default function Notas() {
       <section className="rounded-lg border border-black/[0.06] bg-white p-5">
         <div className="mb-4 flex items-center gap-2">
           <Plus size={18} className="text-accent" />
-          <h2 className="font-semibold text-dark">Gerar nova nota</h2>
+          <h2 className="font-semibold text-dark">Gerar pre-NF-e</h2>
         </div>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <div className="xl:col-span-2">
@@ -320,6 +328,16 @@ export default function Notas() {
               ))}
             </select>
           </div>
+          {form.produto_id && (
+            <div className="xl:col-span-4 rounded-lg border border-info/20 bg-info-bg p-3 text-xs text-info">
+              {(() => {
+                const produto = produtos.find((item) => item.id === form.produto_id)
+                return produto
+                  ? `Fiscal do item: NCM ${produto.ncm || '-'} | CFOP ${produto.cfop || '-'} | CST/CSOSN ${produto.cst_csosn || '-'} | ICMS ${produto.aliquota_icms || 0}% | PIS ${produto.aliquota_pis || 0}% | COFINS ${produto.aliquota_cofins || 0}%`
+                  : ''
+              })()}
+            </div>
+          )}
           <div className="xl:col-span-2">
             <label className={label}>Destinatario</label>
             <input
@@ -379,7 +397,7 @@ export default function Notas() {
           </div>
         </div>
         <div className="mt-4 rounded-lg border border-warning/30 bg-warning-bg p-3 text-xs text-warning">
-          Este fluxo gera documento de teste sem transmissao para SEFAZ e sem validade fiscal.
+          Este fluxo gera XML de pre-NF-e e DANFE de conferencia. Para validade fiscal ainda falta assinar o XML, transmitir para SEFAZ e receber protocolo autorizado.
         </div>
         <div className="mt-4 flex justify-end">
           <button
@@ -387,7 +405,7 @@ export default function Notas() {
             disabled={saving}
             className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-white hover:bg-accent-hover disabled:opacity-50"
           >
-            {saving ? 'Gerando...' : 'Gerar nota simples'}
+            {saving ? 'Gerando...' : 'Gerar pre-NF-e'}
           </button>
         </div>
       </section>
