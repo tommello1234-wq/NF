@@ -37,6 +37,16 @@ const empresaSchema = z.object({
   proximo_numero_nfce: z.coerce.number().int().min(1).optional(),
   tipo_emissao_habilitado: z.enum(['teste_local', 'nfe', 'nfce', 'nfe_nfce']).optional(),
   status_fiscal: z.enum(['incompleta', 'pronta_homologacao', 'pronta_producao']).optional(),
+  // Campos NFS-e Padrão Nacional
+  inscricao_municipal: z.string().optional().nullable(),
+  municipio_emissor_codigo: z.string().regex(/^\d{7}$/).optional().nullable(),
+  regime_especial_tributacao: z.string().optional().nullable(),
+  incentivo_fiscal: z.boolean().optional(),
+  nfse_ambiente: z.coerce.number().int().min(1).max(2).optional(),
+  serie_dps: z.coerce.number().int().min(1).max(99999).optional(),
+  proximo_numero_dps: z.coerce.number().int().min(1).optional(),
+  nfse_codigo_lc116_padrao: z.string().optional().nullable(),
+  nfse_codigo_tributario_municipal_padrao: z.string().optional().nullable(),
 })
 
 function cleanDoc(value?: string | null) {

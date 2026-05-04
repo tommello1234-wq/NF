@@ -46,6 +46,16 @@ interface Empresa {
   proximo_numero_nfce?: number
   tipo_emissao_habilitado?: 'teste_local' | 'nfe' | 'nfce' | 'nfe_nfce'
   status_fiscal?: 'incompleta' | 'pronta_homologacao' | 'pronta_producao'
+  // NFS-e Padrão Nacional
+  inscricao_municipal?: string | null
+  municipio_emissor_codigo?: string | null
+  regime_especial_tributacao?: string | null
+  incentivo_fiscal?: boolean | null
+  nfse_ambiente?: number | null
+  serie_dps?: number | null
+  proximo_numero_dps?: number | null
+  nfse_codigo_lc116_padrao?: string | null
+  nfse_codigo_tributario_municipal_padrao?: string | null
 }
 
 interface CertStatus {
@@ -104,6 +114,15 @@ const emptyForm = {
   serie_nfce: 1,
   proximo_numero_nfce: 1,
   tipo_emissao_habilitado: 'teste_local',
+  inscricao_municipal: '',
+  municipio_emissor_codigo: '',
+  nfse_ambiente: 2,
+  serie_dps: 1,
+  proximo_numero_dps: 1,
+  nfse_codigo_lc116_padrao: '',
+  nfse_codigo_tributario_municipal_padrao: '',
+  regime_especial_tributacao: '',
+  incentivo_fiscal: false,
 }
 
 function onlyDigits(value: string) {
@@ -147,6 +166,15 @@ function toForm(empresa: Empresa) {
     serie_nfce: empresa.serie_nfce || 1,
     proximo_numero_nfce: empresa.proximo_numero_nfce || 1,
     tipo_emissao_habilitado: empresa.tipo_emissao_habilitado || 'teste_local',
+    inscricao_municipal: empresa.inscricao_municipal || '',
+    municipio_emissor_codigo: empresa.municipio_emissor_codigo || empresa.endereco_codigo_ibge || '',
+    nfse_ambiente: empresa.nfse_ambiente || 2,
+    serie_dps: empresa.serie_dps || 1,
+    proximo_numero_dps: empresa.proximo_numero_dps || 1,
+    nfse_codigo_lc116_padrao: empresa.nfse_codigo_lc116_padrao || '',
+    nfse_codigo_tributario_municipal_padrao: empresa.nfse_codigo_tributario_municipal_padrao || '',
+    regime_especial_tributacao: empresa.regime_especial_tributacao || '',
+    incentivo_fiscal: Boolean(empresa.incentivo_fiscal),
   }
 }
 
@@ -481,6 +509,42 @@ export default function EmpresaDetalhe() {
             <label className={label}>CSC Token</label>
             <input className={input} type="password" value={form.csc_token} onChange={(event) => setForm((current) => ({ ...current, csc_token: event.target.value }))} />
           </div>
+        </div>
+
+        <div className="mt-6 border-t border-black/[0.06] pt-4">
+          <h3 className="mb-3 text-sm font-semibold text-dark">NFS-e (Padrão Nacional gov.br/nfse)</h3>
+          <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
+            <div>
+              <label className={label}>Inscrição Municipal</label>
+              <input className={input} value={form.inscricao_municipal} onChange={(event) => setForm((current) => ({ ...current, inscricao_municipal: event.target.value }))} placeholder="IM da prefeitura emissora" />
+            </div>
+            <div>
+              <label className={label}>Cod. IBGE Município emissor</label>
+              <input className={input} maxLength={7} value={form.municipio_emissor_codigo} onChange={(event) => setForm((current) => ({ ...current, municipio_emissor_codigo: event.target.value.replace(/\D/g, '').slice(0,7) }))} placeholder="2309003" />
+            </div>
+            <div>
+              <label className={label}>Ambiente NFS-e</label>
+              <select className={input} value={form.nfse_ambiente} onChange={(event) => setForm((current) => ({ ...current, nfse_ambiente: Number(event.target.value) }))}>
+                <option value={2}>Homologação (Produção Restrita)</option>
+                <option value={1}>Produção (notas reais)</option>
+              </select>
+            </div>
+            <div>
+              <label className={label}>Série DPS</label>
+              <input className={input} type="number" min={1} value={form.serie_dps} onChange={(event) => setForm((current) => ({ ...current, serie_dps: Number(event.target.value) }))} />
+            </div>
+            <div>
+              <label className={label}>Próx. nº DPS</label>
+              <input className={input} type="number" min={1} value={form.proximo_numero_dps} onChange={(event) => setForm((current) => ({ ...current, proximo_numero_dps: Number(event.target.value) }))} />
+            </div>
+            <div>
+              <label className={label}>Cód. LC 116 padrão</label>
+              <input className={input} value={form.nfse_codigo_lc116_padrao} onChange={(event) => setForm((current) => ({ ...current, nfse_codigo_lc116_padrao: event.target.value }))} placeholder="ex: 010501" />
+            </div>
+          </div>
+          <p className="mt-3 text-[11px] text-muted">
+            ME no Simples Nacional geralmente recolhe ISS via DAS — confirme com o contador antes de emitir em produção.
+          </p>
         </div>
       </section>
 

@@ -16,6 +16,13 @@ const produtoSchema = z.object({
   aliquota_icms: z.coerce.number().min(0).max(100).optional().nullable(),
   aliquota_pis: z.coerce.number().min(0).max(100).optional().nullable(),
   aliquota_cofins: z.coerce.number().min(0).max(100).optional().nullable(),
+  // Campos NFS-e (Padrão Nacional) — usados quando tipo='servico'
+  codigo_lc116: z.string().optional().nullable(),
+  codigo_tributario_municipal: z.string().optional().nullable(),
+  codigo_nbs: z.string().optional().nullable(),
+  cnae: z.string().optional().nullable(),
+  aliquota_iss: z.coerce.number().min(0).max(100).optional().nullable(),
+  iss_retido: z.boolean().optional(),
   tipo: z.enum(['produto', 'servico']).default('produto'),
   ativo: z.boolean().optional(),
 })

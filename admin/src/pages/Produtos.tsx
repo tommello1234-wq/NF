@@ -22,6 +22,12 @@ interface Produto {
   aliquota_icms: string | number | null
   aliquota_pis: string | number | null
   aliquota_cofins: string | number | null
+  codigo_lc116: string | null
+  codigo_tributario_municipal: string | null
+  codigo_nbs: string | null
+  cnae: string | null
+  aliquota_iss: string | number | null
+  iss_retido: boolean
   tipo: 'produto' | 'servico'
   ativo: boolean
 }
@@ -40,6 +46,12 @@ const emptyForm = {
   aliquota_icms: 0,
   aliquota_pis: 0,
   aliquota_cofins: 0,
+  codigo_lc116: '',
+  codigo_tributario_municipal: '',
+  codigo_nbs: '',
+  cnae: '',
+  aliquota_iss: 0,
+  iss_retido: false,
   tipo: 'produto' as 'produto' | 'servico',
   ativo: true,
 }
@@ -112,6 +124,12 @@ export default function Produtos() {
       aliquota_icms: Number(produto.aliquota_icms || 0),
       aliquota_pis: Number(produto.aliquota_pis || 0),
       aliquota_cofins: Number(produto.aliquota_cofins || 0),
+      codigo_lc116: produto.codigo_lc116 || '',
+      codigo_tributario_municipal: produto.codigo_tributario_municipal || '',
+      codigo_nbs: produto.codigo_nbs || '',
+      cnae: produto.cnae || '',
+      aliquota_iss: Number(produto.aliquota_iss || 0),
+      iss_retido: Boolean(produto.iss_retido),
       tipo: produto.tipo || 'produto',
       ativo: produto.ativo,
     })
@@ -131,6 +149,7 @@ export default function Produtos() {
       aliquota_icms: Number(form.aliquota_icms || 0),
       aliquota_pis: Number(form.aliquota_pis || 0),
       aliquota_cofins: Number(form.aliquota_cofins || 0),
+      aliquota_iss: Number(form.aliquota_iss || 0),
     }
 
     setSaving(true)
@@ -273,44 +292,85 @@ export default function Produtos() {
               </div>
               <div className="grid gap-4 md:grid-cols-4">
                 <div>
-                  <label className={label}>NCM</label>
-                  <input className={input} value={form.ncm} onChange={(event) => setForm((current) => ({ ...current, ncm: event.target.value }))} />
-                </div>
-                <div>
-                  <label className={label}>CFOP</label>
-                  <input className={input} value={form.cfop} onChange={(event) => setForm((current) => ({ ...current, cfop: event.target.value }))} />
-                </div>
-                <div>
                   <label className={label}>Unidade</label>
                   <input className={input} value={form.unidade} onChange={(event) => setForm((current) => ({ ...current, unidade: event.target.value.toUpperCase() }))} />
                 </div>
-                <div>
-                  <label className={label}>Origem</label>
-                  <input className={input} type="number" min="0" max="8" value={form.origem} onChange={(event) => setForm((current) => ({ ...current, origem: Number(event.target.value) }))} />
-                </div>
-              </div>
-              <div className="grid gap-4 md:grid-cols-4">
-                <div>
-                  <label className={label}>CST/CSOSN</label>
-                  <input className={input} value={form.cst_csosn} onChange={(event) => setForm((current) => ({ ...current, cst_csosn: event.target.value }))} />
-                </div>
-                <div>
-                  <label className={label}>ICMS %</label>
-                  <input className={input} type="number" min="0" max="100" step="0.01" value={form.aliquota_icms} onChange={(event) => setForm((current) => ({ ...current, aliquota_icms: Number(event.target.value) }))} />
-                </div>
-                <div>
-                  <label className={label}>PIS %</label>
-                  <input className={input} type="number" min="0" max="100" step="0.01" value={form.aliquota_pis} onChange={(event) => setForm((current) => ({ ...current, aliquota_pis: Number(event.target.value) }))} />
-                </div>
-                <div>
-                  <label className={label}>COFINS %</label>
-                  <input className={input} type="number" min="0" max="100" step="0.01" value={form.aliquota_cofins} onChange={(event) => setForm((current) => ({ ...current, aliquota_cofins: Number(event.target.value) }))} />
-                </div>
-                <label className="flex items-center gap-2 text-sm text-muted-dark">
+                <label className="flex items-end gap-2 pb-2 text-sm text-muted-dark">
                   <input type="checkbox" checked={form.ativo} onChange={(event) => setForm((current) => ({ ...current, ativo: event.target.checked }))} />
                   Ativo
                 </label>
               </div>
+
+              {form.tipo === 'produto' ? (
+                <>
+                  <div className="border-t border-black/[0.06] pt-4">
+                    <h4 className="mb-3 text-xs font-semibold uppercase text-muted">Dados de mercadoria (NF-e / NFC-e)</h4>
+                    <div className="grid gap-4 md:grid-cols-4">
+                      <div>
+                        <label className={label}>NCM</label>
+                        <input className={input} value={form.ncm} onChange={(event) => setForm((current) => ({ ...current, ncm: event.target.value }))} />
+                      </div>
+                      <div>
+                        <label className={label}>CFOP</label>
+                        <input className={input} value={form.cfop} onChange={(event) => setForm((current) => ({ ...current, cfop: event.target.value }))} />
+                      </div>
+                      <div>
+                        <label className={label}>Origem</label>
+                        <input className={input} type="number" min="0" max="8" value={form.origem} onChange={(event) => setForm((current) => ({ ...current, origem: Number(event.target.value) }))} />
+                      </div>
+                      <div>
+                        <label className={label}>CST/CSOSN</label>
+                        <input className={input} value={form.cst_csosn} onChange={(event) => setForm((current) => ({ ...current, cst_csosn: event.target.value }))} />
+                      </div>
+                    </div>
+                    <div className="mt-4 grid gap-4 md:grid-cols-3">
+                      <div>
+                        <label className={label}>ICMS %</label>
+                        <input className={input} type="number" min="0" max="100" step="0.01" value={form.aliquota_icms} onChange={(event) => setForm((current) => ({ ...current, aliquota_icms: Number(event.target.value) }))} />
+                      </div>
+                      <div>
+                        <label className={label}>PIS %</label>
+                        <input className={input} type="number" min="0" max="100" step="0.01" value={form.aliquota_pis} onChange={(event) => setForm((current) => ({ ...current, aliquota_pis: Number(event.target.value) }))} />
+                      </div>
+                      <div>
+                        <label className={label}>COFINS %</label>
+                        <input className={input} type="number" min="0" max="100" step="0.01" value={form.aliquota_cofins} onChange={(event) => setForm((current) => ({ ...current, aliquota_cofins: Number(event.target.value) }))} />
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="border-t border-black/[0.06] pt-4">
+                  <h4 className="mb-3 text-xs font-semibold uppercase text-muted">Dados de servico (NFS-e Padrao Nacional)</h4>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label className={label}>Item LC 116 / Codigo de tributacao nacional</label>
+                      <input className={input} placeholder="ex: 1.05" value={form.codigo_lc116} onChange={(event) => setForm((current) => ({ ...current, codigo_lc116: event.target.value }))} />
+                    </div>
+                    <div>
+                      <label className={label}>Codigo tributario municipal</label>
+                      <input className={input} placeholder="codigo da prefeitura" value={form.codigo_tributario_municipal} onChange={(event) => setForm((current) => ({ ...current, codigo_tributario_municipal: event.target.value }))} />
+                    </div>
+                    <div>
+                      <label className={label}>Codigo NBS (opcional)</label>
+                      <input className={input} value={form.codigo_nbs} onChange={(event) => setForm((current) => ({ ...current, codigo_nbs: event.target.value }))} />
+                    </div>
+                    <div>
+                      <label className={label}>CNAE (opcional)</label>
+                      <input className={input} value={form.cnae} onChange={(event) => setForm((current) => ({ ...current, cnae: event.target.value }))} />
+                    </div>
+                    <div>
+                      <label className={label}>Aliquota ISS %</label>
+                      <input className={input} type="number" min="0" max="100" step="0.01" value={form.aliquota_iss} onChange={(event) => setForm((current) => ({ ...current, aliquota_iss: Number(event.target.value) }))} />
+                      <p className="mt-1 text-[11px] text-muted">ME no Simples Nacional geralmente recolhe ISS via DAS — confirme com seu contador antes de emitir em producao.</p>
+                    </div>
+                    <label className="flex items-end gap-2 pb-2 text-sm text-muted-dark">
+                      <input type="checkbox" checked={form.iss_retido} onChange={(event) => setForm((current) => ({ ...current, iss_retido: event.target.checked }))} />
+                      ISS retido pelo tomador
+                    </label>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="flex justify-end gap-2 border-t border-black/[0.06] bg-light-secondary/40 p-3">
               <button onClick={() => setShowModal(false)} className="rounded-lg border border-black/[0.08] bg-white px-4 py-2 text-sm">Cancelar</button>
