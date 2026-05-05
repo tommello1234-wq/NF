@@ -17,6 +17,7 @@ import {
   carregarMaterialPfx,
   compressGzipBase64,
   criarMtlsAgent,
+  decompressGzipBase64,
   postDps,
   postEvento,
   signDps,
@@ -322,19 +323,50 @@ interface ProcessarParams {
 
 async function processarRespostaSefin(p: ProcessarParams): Promise<EmitirNfseResult> {
   // Sucesso = 201 Created (NFS-e gerada); 400/403/500 = erro
-  if (p.raw.status === 201) {
-    // Resposta tem estrutura NFSePostResponseSucesso (vamos tentar parsear)
+  // SEFIN aceita também 200 OK em algumas situações (depende da versão).
+  // Aceita 200 ou 201 como sucesso quando o body inclui chaveAcesso.
+  const sucesso = p.raw.status === 200 || p.raw.status === 201
+  if (sucesso) {
+    // Estrutura observada na resposta SEFIN:
+    //   { idDps, chaveAcesso, tipoAmbiente, alertas, nfseXmlGZipB64, ... }
+    // O XML da NFS-e vem em nfseXmlGZipB64 (GZip+Base64) — descompacta
+    // antes de salvar no Storage.
     let chaveAcesso: string | undefined
     let numeroNfse: string | undefined
     let xmlNfsePath: string | undefined
 
     try {
-      const json = JSON.parse(p.raw.body)
-      // Estruturas variam — guardar o cru e extrair campos comuns
+      const json = JSON.parse(p.raw.body) as {
+        chaveAcesso?: string
+        ChaveAcesso?: string
+        chave?: string
+        nNFSe?: string
+        numeroNFSe?: string
+        numero?: string
+        nfseXmlGZipB64?: string
+        nfseXml?: string
+      }
       chaveAcesso = json.chaveAcesso || json.ChaveAcesso || json.chave
       numeroNfse = json.nNFSe || json.numeroNFSe || json.numero
-      const nfseXml = json.nfseXml || json.NFSeXml || json.xml
+
+      let nfseXml: string | undefined
+      if (json.nfseXmlGZipB64) {
+        try {
+          nfseXml = decompressGzipBase64(json.nfseXmlGZipB64)
+        } catch (e) {
+          // mantém o b64 se descompactação falhar
+          nfseXml = undefined
+        }
+      } else if (json.nfseXml) {
+        nfseXml = json.nfseXml
+      }
+
       if (nfseXml) {
+        // Tenta extrair <nNFSe>numero</nNFSe> do XML se não veio no JSON
+        if (!numeroNfse) {
+          const m = nfseXml.match(/<nNFSe>([^<]+)<\/nNFSe>/)
+          if (m) numeroNfse = m[1]
+        }
         xmlNfsePath = `${p.empresaId}/${nowYYYYMM()}/${p.idDps}-nfse.xml`
         await supabase.storage.from('nfse-xml').upload(xmlNfsePath, nfseXml, {
           upsert: true,
