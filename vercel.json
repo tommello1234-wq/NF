@@ -21,13 +21,11 @@
     }
   ],
   "routes": [
-    { "src": "^/api$", "dest": "/api/index" },
-    { "src": "^/api/(.*)$", "dest": "/api/index" },
-    { "src": "^/admin/(.*)$", "dest": "/api/index" },
-    { "src": "^/webhooks/(.*)$", "dest": "/api/index" },
-    { "src": "^/v1/(.*)$", "dest": "/api/index" },
-    { "src": "^/assets/(.*)$", "dest": "/assets/$1" },
-    { "src": "^/(favicon\\.ico|robots\\.txt|.*\\.(svg|png|jpg|jpeg|webp|gif|ico|css|js|map|json|woff|woff2|ttf))$", "dest": "/$1" },
-    { "src": "^/(.*)$", "dest": "/index.html" }
+    { "src": "/api(/.*)?", "dest": "/api/index" },
+    { "src": "/v1(/.*)?", "dest": "/api/index" },
+    { "src": "/admin(/.*)?", "dest": "/api/index" },
+    { "src": "/webhooks(/.*)?", "dest": "/api/index" },
+    { "handle": "filesystem" },
+    { "src": "/.*", "dest": "/index.html" }
   ]
 }
