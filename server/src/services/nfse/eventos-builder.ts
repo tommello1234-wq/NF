@@ -53,8 +53,6 @@ export interface CancelamentoEventoInput {
 
 export function buildEventoCancelamentoXml(input: CancelamentoEventoInput): { xml: string; idEvento: string; tpEvento: string } {
   const tpEvento = '101101'
-  const seq = (input.sequencial || 1)
-  const seqStr = String(seq).padStart(3, '0')
   const chave = (input.chaveAcesso || '').replace(/\D/g, '').padStart(50, '0')
   if (chave.length !== 50) {
     throw new Error(`Chave de acesso NFS-e deve ter 50 dígitos: ${chave}`)
@@ -63,7 +61,10 @@ export function buildEventoCancelamentoXml(input: CancelamentoEventoInput): { xm
   const dhEvento = isoUtc(input.dataHora || new Date())
   const verAplic = (input.versaoAplicativo || 'NFSE-API-1.0').slice(0, 20)
 
-  const idEvento = `PRE${chave}${tpEvento}${seqStr}`
+  // TSIdPedRefEvt: pattern PRE[0-9]{56} → 59 chars no total
+  // Composição: PRE + chave(50) + tpEvento(6) = 59
+  // O nPedRegEvento (sequencial) NÃO entra no Id — fica implícito como 1
+  const idEvento = `PRE${chave}${tpEvento}`
   if (idEvento.length !== 59) {
     throw new Error(`Id do evento inválido (${idEvento.length} chars): ${idEvento}`)
   }
