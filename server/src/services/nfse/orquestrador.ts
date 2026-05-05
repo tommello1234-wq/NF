@@ -557,7 +557,7 @@ export async function cancelarNfse(input: CancelarNfseInput): Promise<CancelarNf
       }
     }
 
-    // Erro na resposta
+    // Erro na resposta — persiste no banco pra ficar visível na UI
     let erros: Array<{ codigo: string; descricao: string; complemento?: string }> = []
     try {
       const json = JSON.parse(res.body) as { erros?: Array<{ Codigo: string; Descricao: string; Complemento?: string }> }
@@ -569,6 +569,25 @@ export async function cancelarNfse(input: CancelarNfseInput): Promise<CancelarNf
     } catch {
       erros = [{ codigo: 'HTTP', descricao: `Status ${res.status}: ${res.body.slice(0, 200)}` }]
     }
+    const motivoRejeicao =
+      erros.length > 0
+        ? `Cancelamento rejeitado: ${erros.map((e) => `[${e.codigo}] ${e.descricao}${e.complemento ? ' — ' + e.complemento : ''}`).join(' | ')}`
+        : `Cancelamento rejeitado (HTTP ${res.status})`
+    const mensagensAnteriores =
+      typeof nota.mensagens_retorno === 'object' && nota.mensagens_retorno !== null
+        ? (nota.mensagens_retorno as Record<string, unknown>)
+        : {}
+    await supabase
+      .from('notas_fiscais')
+      .update({
+        motivo_rejeicao: motivoRejeicao,
+        mensagens_retorno: {
+          ...mensagensAnteriores,
+          evento_cancelamento_erro: tryParseJson(res.body),
+          evento_cancelamento_status: res.status,
+        },
+      })
+      .eq('id', input.notaId)
     return {
       notaId: input.notaId,
       status: 'rejeitada',
@@ -580,6 +599,12 @@ export async function cancelarNfse(input: CancelarNfseInput): Promise<CancelarNf
       rawStatus: res.status,
     }
   } catch (e) {
+    await supabase
+      .from('notas_fiscais')
+      .update({
+        motivo_rejeicao: `Cancelamento (erro local): ${(e as Error).message}`.slice(0, 1000),
+      })
+      .eq('id', input.notaId)
     return {
       notaId: input.notaId,
       status: 'falha_temporaria',
