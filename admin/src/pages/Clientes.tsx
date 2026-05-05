@@ -248,23 +248,28 @@ export default function Clientes() {
               <button onClick={() => setShowModal(false)}><X size={18} /></button>
             </div>
             <div className="max-h-[72vh] space-y-4 overflow-y-auto p-5">
+              <div className="rounded-lg border border-info/20 bg-info-bg p-3 text-xs text-info">
+                Cadastre aqui as <strong>pessoas que compram de você</strong> (tomadores do servico).
+                Os campos sao dados do <strong>cliente</strong>, nao da sua empresa.
+              </div>
               <div className="grid gap-4 md:grid-cols-2">
                 <div>
-                  <label className={label}>Empresa</label>
+                  <label className={label}>Empresa emitente (sua)</label>
                   <select className={input} value={form.empresa_id} onChange={(event) => setForm((current) => ({ ...current, empresa_id: event.target.value }))}>
                     {empresas.map((empresa) => <option key={empresa.id} value={empresa.id}>{empresa.nome}</option>)}
                   </select>
+                  <p className="mt-1 text-[11px] text-muted">A qual das suas empresas esse cliente esta vinculado.</p>
                 </div>
                 <div>
-                  <label className={label}>Nome/Razao social</label>
-                  <input className={input} value={form.nome} onChange={(event) => setForm((current) => ({ ...current, nome: event.target.value }))} />
+                  <label className={label}>Nome do cliente / Razao social</label>
+                  <input className={input} placeholder="Nome de quem compra" value={form.nome} onChange={(event) => setForm((current) => ({ ...current, nome: event.target.value }))} />
                 </div>
                 <div>
-                  <label className={label}>CPF/CNPJ</label>
-                  <input className={input} value={form.cpf_cnpj} onChange={(event) => setForm((current) => ({ ...current, cpf_cnpj: event.target.value }))} />
+                  <label className={label}>CPF/CNPJ do cliente</label>
+                  <input className={input} placeholder="So digitos" value={form.cpf_cnpj} onChange={(event) => setForm((current) => ({ ...current, cpf_cnpj: event.target.value }))} />
                 </div>
                 <div>
-                  <label className={label}>Inscricao estadual</label>
+                  <label className={label}>Inscricao estadual do cliente (opcional)</label>
                   <input className={input} value={form.ie} onChange={(event) => setForm((current) => ({ ...current, ie: event.target.value }))} />
                 </div>
                 <div>
