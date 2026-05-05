@@ -104,8 +104,8 @@ export async function emitirNfse(input: EmitirNfseInput): Promise<EmitirNfseResu
     throw new Error('Serviço sem código LC 116 — confirme com o contador antes de emitir')
   }
 
-  // 3. Carrega tomador
-  const tomador = await resolveTomador(input)
+  // 3. Carrega tomador (usa município emissor como fallback de IBGE)
+  const tomador = await resolveTomador(input, cMunEmi)
 
   // 4. Carrega certificado
   const cert = await carregarCertificado(input.empresaId)
@@ -229,14 +229,20 @@ export async function emitirNfse(input: EmitirNfseInput): Promise<EmitirNfseResu
 
 // === helpers ===
 
-async function resolveTomador(input: EmitirNfseInput) {
+async function resolveTomador(input: EmitirNfseInput, cMunFallback: string) {
   if (input.tomadorOverride) {
+    const enderecoOverride = input.tomadorOverride.endereco
     return {
       cpf: input.tomadorOverride.cpf,
       cnpj: input.tomadorOverride.cnpj,
       nome: input.tomadorOverride.nome,
       email: input.tomadorOverride.email,
-      endereco: input.tomadorOverride.endereco,
+      endereco: enderecoOverride
+        ? {
+            ...enderecoOverride,
+            codigoMunicipio: enderecoOverride.codigoMunicipio || cMunFallback,
+          }
+        : undefined,
     }
   }
   if (!input.clienteId) throw new Error('clienteId ou tomadorOverride é obrigatório')
@@ -250,15 +256,21 @@ async function resolveTomador(input: EmitirNfseInput) {
   const cpfCnpj = (cli.cpf_cnpj || '').replace(/\D/g, '')
   const isCpf = cpfCnpj.length === 11
 
-  const endereco = cli.endereco_logradouro
-    ? {
-        logradouro: cli.endereco_logradouro,
-        numero: cli.endereco_numero || 'S/N',
-        bairro: cli.endereco_bairro || 'Centro',
-        codigoMunicipio: cli.endereco_codigo_ibge || '',
-        cep: (cli.endereco_cep || '').replace(/\D/g, ''),
-      }
-    : undefined
+  // Endereço é obrigatório no DPS quando ISS é retido pelo tomador, e o
+  // SEFIN também rejeita quando vazio em outros cenários (E0237). Por
+  // segurança, sempre montamos um endereço — se o cliente foi cadastrado
+  // sem endereço, usamos um fallback no município emissor.
+  const cep = (cli.endereco_cep || '').replace(/\D/g, '')
+  const endereco = {
+    logradouro: cli.endereco_logradouro || 'Nao informado',
+    numero: cli.endereco_numero || 'S/N',
+    bairro: cli.endereco_bairro || 'Centro',
+    codigoMunicipio:
+      (cli.endereco_codigo_ibge && /^\d{7}$/.test(cli.endereco_codigo_ibge))
+        ? cli.endereco_codigo_ibge
+        : cMunFallback,
+    cep: cep && cep.length === 8 ? cep : '00000000',
+  }
 
   return {
     ...(isCpf ? { cpf: cpfCnpj } : { cnpj: cpfCnpj }),
