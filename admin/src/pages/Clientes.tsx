@@ -52,6 +52,31 @@ function inferTipo(doc: string): TipoPessoa {
   return onlyDigits(doc).length === 14 ? 'pj' : 'pf'
 }
 
+interface ViaCepResponse {
+  cep?: string
+  logradouro?: string
+  complemento?: string
+  bairro?: string
+  localidade?: string
+  uf?: string
+  ibge?: string
+  erro?: boolean | string
+}
+
+async function consultaCep(cep: string): Promise<ViaCepResponse | null> {
+  const digits = onlyDigits(cep)
+  if (digits.length !== 8) return null
+  try {
+    const res = await fetch(`https://viacep.com.br/ws/${digits}/json/`)
+    if (!res.ok) return null
+    const data = (await res.json()) as ViaCepResponse
+    if (data.erro) return null
+    return data
+  } catch {
+    return null
+  }
+}
+
 function onlyDigits(value: string) {
   return value.replace(/\D/g, '')
 }
@@ -141,6 +166,32 @@ export default function Clientes() {
       // PF não tem IE — limpa quando troca pra PF
       ie: novo === 'pf' ? '' : current.ie,
     }))
+  }
+
+  const [buscandoCep, setBuscandoCep] = useState(false)
+
+  async function handleCepChange(novoCep: string) {
+    setForm((current) => ({ ...current, endereco_cep: novoCep }))
+    const digits = onlyDigits(novoCep)
+    if (digits.length !== 8) return
+    setBuscandoCep(true)
+    try {
+      const data = await consultaCep(digits)
+      if (!data) {
+        toast.warning('CEP não encontrado')
+        return
+      }
+      setForm((current) => ({
+        ...current,
+        endereco_logradouro: data.logradouro || current.endereco_logradouro,
+        endereco_bairro: data.bairro || current.endereco_bairro,
+        endereco_cidade: data.localidade || current.endereco_cidade,
+        endereco_uf: (data.uf || current.endereco_uf || 'CE').toUpperCase().slice(0, 2),
+        endereco_codigo_ibge: data.ibge || current.endereco_codigo_ibge,
+      }))
+    } finally {
+      setBuscandoCep(false)
+    }
   }
 
   async function save() {
@@ -384,42 +435,63 @@ export default function Clientes() {
                   <input className={input} placeholder="(00) 00000-0000" value={form.telefone} onChange={(event) => setForm((current) => ({ ...current, telefone: event.target.value }))} />
                 </div>
               </div>
-              <div className="grid gap-4 md:grid-cols-3">
-                <div>
-                  <label className={label}>Logradouro</label>
-                  <input className={input} value={form.endereco_logradouro} onChange={(event) => setForm((current) => ({ ...current, endereco_logradouro: event.target.value }))} />
-                </div>
-                <div>
-                  <label className={label}>Numero</label>
-                  <input className={input} value={form.endereco_numero} onChange={(event) => setForm((current) => ({ ...current, endereco_numero: event.target.value }))} />
-                </div>
-                <div>
-                  <label className={label}>Bairro</label>
-                  <input className={input} value={form.endereco_bairro} onChange={(event) => setForm((current) => ({ ...current, endereco_bairro: event.target.value }))} />
+              <div className="border-t border-black/[0.06] pt-4">
+                <h4 className="mb-3 text-xs font-semibold uppercase text-muted">Endereco do cliente</h4>
+                <div className="grid gap-4 md:grid-cols-4">
+                  <div className="md:col-span-2">
+                    <label className={label}>
+                      CEP {buscandoCep && <span className="ml-1 text-info">(buscando...)</span>}
+                    </label>
+                    <input
+                      className={input}
+                      placeholder="00000-000"
+                      maxLength={9}
+                      value={form.endereco_cep}
+                      onChange={(event) => handleCepChange(event.target.value)}
+                    />
+                    <p className="mt-1 text-[11px] text-muted">
+                      Ao digitar o CEP, logradouro, bairro, cidade, UF e codigo IBGE sao preenchidos automaticamente.
+                    </p>
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className={label}>Logradouro</label>
+                    <input className={input} value={form.endereco_logradouro} onChange={(event) => setForm((current) => ({ ...current, endereco_logradouro: event.target.value }))} />
+                  </div>
+                  <div>
+                    <label className={label}>Numero</label>
+                    <input className={input} placeholder="123 ou S/N" value={form.endereco_numero} onChange={(event) => setForm((current) => ({ ...current, endereco_numero: event.target.value }))} />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className={label}>Bairro</label>
+                    <input className={input} value={form.endereco_bairro} onChange={(event) => setForm((current) => ({ ...current, endereco_bairro: event.target.value }))} />
+                  </div>
+                  <div>
+                    <label className={label}>UF</label>
+                    <input className={input} maxLength={2} value={form.endereco_uf} onChange={(event) => setForm((current) => ({ ...current, endereco_uf: event.target.value.toUpperCase().slice(0, 2) }))} />
+                  </div>
+                  <div className="md:col-span-3">
+                    <label className={label}>Cidade</label>
+                    <input className={input} value={form.endereco_cidade} onChange={(event) => setForm((current) => ({ ...current, endereco_cidade: event.target.value }))} />
+                  </div>
+                  <div>
+                    <label className={label}>
+                      Cod. IBGE
+                      <span className="ml-1 text-[10px] font-normal text-muted">(automatico)</span>
+                    </label>
+                    <input
+                      className={input + ' bg-light-secondary'}
+                      readOnly
+                      value={form.endereco_codigo_ibge}
+                      title="Preenchido automaticamente pelo CEP"
+                    />
+                  </div>
                 </div>
               </div>
-              <div className="grid gap-4 md:grid-cols-4">
-                <div className="md:col-span-2">
-                  <label className={label}>Cidade</label>
-                  <input className={input} value={form.endereco_cidade} onChange={(event) => setForm((current) => ({ ...current, endereco_cidade: event.target.value }))} />
-                </div>
-                <div>
-                  <label className={label}>UF</label>
-                  <input className={input} maxLength={2} value={form.endereco_uf} onChange={(event) => setForm((current) => ({ ...current, endereco_uf: event.target.value.toUpperCase().slice(0, 2) }))} />
-                </div>
-                <div>
-                  <label className={label}>CEP</label>
-                  <input className={input} value={form.endereco_cep} onChange={(event) => setForm((current) => ({ ...current, endereco_cep: event.target.value }))} />
-                </div>
-                <div className="md:col-span-2">
-                  <label className={label}>Codigo IBGE</label>
-                  <input className={input} value={form.endereco_codigo_ibge} onChange={(event) => setForm((current) => ({ ...current, endereco_codigo_ibge: event.target.value }))} />
-                </div>
-                <label className="mt-6 flex items-center gap-2 text-sm text-muted-dark">
-                  <input type="checkbox" checked={form.ativo} onChange={(event) => setForm((current) => ({ ...current, ativo: event.target.checked }))} />
-                  Ativo
-                </label>
-              </div>
+
+              <label className="flex items-center gap-2 text-sm text-muted-dark">
+                <input type="checkbox" checked={form.ativo} onChange={(event) => setForm((current) => ({ ...current, ativo: event.target.checked }))} />
+                Ativo
+              </label>
             </div>
             <div className="flex justify-end gap-2 border-t border-black/[0.06] bg-light-secondary/40 p-3">
               <button onClick={() => setShowModal(false)} className="rounded-lg border border-black/[0.08] bg-white px-4 py-2 text-sm">Cancelar</button>
