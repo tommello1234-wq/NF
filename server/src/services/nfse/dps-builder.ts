@@ -59,10 +59,13 @@ export function buildDpsXml(input: DpsInput): { xml: string; idDps: string } {
   inf.ele('cLocEmi').txt(cMunEmi)
 
   // === prest ===
+  // SEFIN regra E0121: quando o emitente da DPS é o próprio prestador
+  // (tpEmit=1), <xNome> NÃO deve ser enviado — a Receita preenche pelo
+  // CNPJ. Como nosso fluxo sempre tem o prestador emitindo, omitimos
+  // xNome aqui.
   const prest = inf.ele('prest')
   prest.ele('CNPJ').txt(cnpj)
   prest.ele('IM').txt(input.prestador.inscricaoMunicipal)
-  prest.ele('xNome').txt(input.prestador.nome)
   const regTrib = prest.ele('regTrib')
   regTrib.ele('opSimpNac').txt(String(input.prestador.regimeTributario.opSimpNac))
   regTrib.ele('regApTribSN').txt(String(input.prestador.regimeTributario.regApTribSN ?? 1))
