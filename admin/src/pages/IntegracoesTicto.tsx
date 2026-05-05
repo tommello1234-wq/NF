@@ -47,7 +47,12 @@ interface WebhookEvent {
   payload: Record<string, unknown>
 }
 
-const API_URL = (import.meta.env.VITE_API_URL as string) || (import.meta.env.PROD ? '/api' : 'http://localhost:3001')
+// URL pública pra Ticto chamar — em prod usa o origin atual (rewrite
+// /webhooks/(.*) -> /api/index no vercel.json); em dev aponta direto pro
+// backend Fastify em localhost:3001.
+const PUBLIC_BASE = import.meta.env.PROD
+  ? (typeof window !== 'undefined' ? window.location.origin : '')
+  : 'http://localhost:3001'
 
 function dateTime(value?: string | null) {
   return value ? new Date(value).toLocaleString('pt-BR') : '-'
@@ -78,7 +83,7 @@ export default function IntegracoesTicto() {
   })
   const [savingMap, setSavingMap] = useState(false)
 
-  const webhookUrl = config ? `${API_URL}${config.webhook_path}` : ''
+  const webhookUrl = config ? `${PUBLIC_BASE}${config.webhook_path}` : ''
 
   useEffect(() => {
     loadInitial()
