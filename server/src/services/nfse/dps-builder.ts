@@ -95,7 +95,8 @@ export function buildDpsXml(input: DpsInput): { xml: string; idDps: string } {
   const trib = valores.ele('trib')
   const tribMun = trib.ele('tribMun')
   tribMun.ele('tribISSQN').txt('1') // 1=Operação tributável
-  tribMun.ele('tpRetISSQN').txt(input.valores.issRetido ? '1' : '2') // 1=Retido, 2=Não retido
+  // TSTipoRetISSQN: 1=Não Retido, 2=Retido pelo Tomador, 3=Retido pelo Intermediário
+  tribMun.ele('tpRetISSQN').txt(input.valores.issRetido ? '2' : '1')
   tribMun.ele('pAliq').txt(money(input.valores.aliquotaIss))
 
   // SEFIN regra E0712: ME/EPP (opSimpNac=2 ou 3) NÃO pode usar
