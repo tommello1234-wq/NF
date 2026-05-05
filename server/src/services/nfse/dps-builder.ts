@@ -125,12 +125,22 @@ function appendEndereco(parent: ReturnType<typeof create>, e: EnderecoDps) {
 }
 
 function isoUtc(d: Date): string {
+  // Sempre serializa em horário de Brasília (UTC-3), independente do timezone
+  // do servidor (Vercel roda em UTC). E subtrai 60s pra evitar clock skew
+  // contra o servidor SEFIN — erro E0008 acontece quando dhEmi está alguns
+  // milissegundos à frente do relógio do SEFIN.
   const pad = (n: number, len = 2) => String(n).padStart(len, '0')
-  const tzMin = -d.getTimezoneOffset()
-  const sign = tzMin >= 0 ? '+' : '-'
-  const tzh = pad(Math.floor(Math.abs(tzMin) / 60))
-  const tzm = pad(Math.abs(tzMin) % 60)
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}${sign}${tzh}:${tzm}`
+  const TZ_OFFSET_MIN = -180 // -03:00
+  const adjusted = new Date(d.getTime() - 60_000 + TZ_OFFSET_MIN * 60_000)
+  // adjusted está agora em UTC com horário local Brasília menos 60s.
+  // Vamos extrair YYYY-MM-DDTHH:mm:ss diretamente dos componentes UTC.
+  const Y = adjusted.getUTCFullYear()
+  const M = pad(adjusted.getUTCMonth() + 1)
+  const D = pad(adjusted.getUTCDate())
+  const h = pad(adjusted.getUTCHours())
+  const m = pad(adjusted.getUTCMinutes())
+  const s = pad(adjusted.getUTCSeconds())
+  return `${Y}-${M}-${D}T${h}:${m}:${s}-03:00`
 }
 
 function ymd(d: Date): string {

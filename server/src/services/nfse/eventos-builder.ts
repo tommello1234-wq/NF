@@ -93,10 +93,16 @@ export function buildEventoCancelamentoXml(input: CancelamentoEventoInput): { xm
 }
 
 function isoUtc(d: Date): string {
+  // Sempre em horário de Brasília (UTC-3) — Vercel roda em UTC, então
+  // formatamos manualmente. Subtrai 60s pra evitar clock skew (E0008).
   const pad = (n: number, len = 2) => String(n).padStart(len, '0')
-  const tzMin = -d.getTimezoneOffset()
-  const sign = tzMin >= 0 ? '+' : '-'
-  const tzh = pad(Math.floor(Math.abs(tzMin) / 60))
-  const tzm = pad(Math.abs(tzMin) % 60)
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}${sign}${tzh}:${tzm}`
+  const TZ_OFFSET_MIN = -180
+  const adjusted = new Date(d.getTime() - 60_000 + TZ_OFFSET_MIN * 60_000)
+  const Y = adjusted.getUTCFullYear()
+  const M = pad(adjusted.getUTCMonth() + 1)
+  const D = pad(adjusted.getUTCDate())
+  const h = pad(adjusted.getUTCHours())
+  const m = pad(adjusted.getUTCMinutes())
+  const s = pad(adjusted.getUTCSeconds())
+  return `${Y}-${M}-${D}T${h}:${m}:${s}-03:00`
 }
