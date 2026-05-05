@@ -97,7 +97,21 @@ export function buildDpsXml(input: DpsInput): { xml: string; idDps: string } {
   tribMun.ele('tribISSQN').txt('1') // 1=Operação tributável
   tribMun.ele('tpRetISSQN').txt(input.valores.issRetido ? '1' : '2') // 1=Retido, 2=Não retido
   tribMun.ele('pAliq').txt(money(input.valores.aliquotaIss))
-  trib.ele('totTrib').ele('indTotTrib').txt('0') // 0=Não informar valor estimado
+
+  // SEFIN regra E0712: ME/EPP (opSimpNac=2 ou 3) NÃO pode usar
+  // <indTotTrib>. Tem que informar <pTotTribSN> (percentual aproximado
+  // total dos tributos pagos via DAS).
+  // Default: 6% (Anexo III faixa 1 do Simples — serviços). Confirmar
+  // com a contadora a alíquota efetiva real e ajustar.
+  const opSimpNac = input.prestador.regimeTributario.opSimpNac
+  const totTrib = trib.ele('totTrib')
+  if (opSimpNac === 2 || opSimpNac === 3) {
+    const pSN = (input.valores as { pTotTribSN?: number }).pTotTribSN ?? 6.00
+    totTrib.ele('pTotTribSN').txt(money(pSN))
+  } else {
+    // Não-Simples: indica que não declara valor estimado (Decreto 8.264/2014)
+    totTrib.ele('indTotTrib').txt('0')
+  }
 
   const xml = doc.end({ headless: false, prettyPrint: false })
   return { xml, idDps }

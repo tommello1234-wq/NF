@@ -103,6 +103,13 @@ export interface ValoresDps {
   /** Alíquota ISS efetiva (em %) — pra ME no Simples geralmente 0 */
   aliquotaIss: number
   issRetido: boolean
+  /**
+   * Apenas pra ME/EPP no Simples Nacional: percentual aproximado total
+   * dos tributos pagos via DAS (Lei da Transparência). Default 6%
+   * (Anexo III faixa 1). Confirmar com contadora pra ajustar conforme
+   * faixa efetiva.
+   */
+  pTotTribSN?: number
 }
 
 /** Resposta crua do POST /nfse — pode ser sucesso (XML NFS-e) ou rejeição (JSON) */
