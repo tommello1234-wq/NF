@@ -27,9 +27,12 @@ interface Cliente {
   ativo: boolean
 }
 
+type TipoPessoa = 'pf' | 'pj'
+
 const emptyForm = {
   id: '',
   empresa_id: '',
+  tipo_pessoa: 'pf' as TipoPessoa,
   nome: '',
   cpf_cnpj: '',
   ie: '',
@@ -43,6 +46,10 @@ const emptyForm = {
   endereco_cep: '',
   endereco_codigo_ibge: '',
   ativo: true,
+}
+
+function inferTipo(doc: string): TipoPessoa {
+  return onlyDigits(doc).length === 14 ? 'pj' : 'pf'
 }
 
 function onlyDigits(value: string) {
@@ -109,6 +116,7 @@ export default function Clientes() {
     setForm({
       id: cliente.id,
       empresa_id: cliente.empresa_id,
+      tipo_pessoa: inferTipo(cliente.cpf_cnpj || ''),
       nome: cliente.nome || '',
       cpf_cnpj: cliente.cpf_cnpj || '',
       ie: cliente.ie || '',
@@ -126,15 +134,34 @@ export default function Clientes() {
     setShowModal(true)
   }
 
+  function trocarTipo(novo: TipoPessoa) {
+    setForm((current) => ({
+      ...current,
+      tipo_pessoa: novo,
+      // PF não tem IE — limpa quando troca pra PF
+      ie: novo === 'pf' ? '' : current.ie,
+    }))
+  }
+
   async function save() {
     if (!form.empresa_id || !form.nome.trim() || !form.cpf_cnpj.trim()) {
       toast.warning('Preencha empresa, nome e CPF/CNPJ')
       return
     }
 
+    const docDigits = onlyDigits(form.cpf_cnpj)
+    const docEsperado = form.tipo_pessoa === 'pf' ? 11 : 14
+    if (docDigits.length !== docEsperado) {
+      toast.warning(form.tipo_pessoa === 'pf' ? 'CPF deve ter 11 dígitos' : 'CNPJ deve ter 14 dígitos')
+      return
+    }
+
+    // tipo_pessoa é só pra UI — não vai pro backend
+    const { tipo_pessoa: _ignored, ...rest } = form
+    void _ignored
     const payload = {
-      ...form,
-      cpf_cnpj: onlyDigits(form.cpf_cnpj),
+      ...rest,
+      cpf_cnpj: docDigits,
       endereco_uf: form.endereco_uf.toUpperCase().slice(0, 2),
     }
 
@@ -249,36 +276,112 @@ export default function Clientes() {
             </div>
             <div className="max-h-[72vh] space-y-4 overflow-y-auto p-5">
               <div className="rounded-lg border border-info/20 bg-info-bg p-3 text-xs text-info">
-                Cadastre aqui as <strong>pessoas que compram de você</strong> (tomadores do servico).
+                Cadastre aqui as <strong>pessoas que compram de voce</strong> (tomadores do servico).
                 Os campos sao dados do <strong>cliente</strong>, nao da sua empresa.
               </div>
+
+              {/* Toggle PF / PJ */}
+              <div>
+                <label className={label}>Tipo de cliente</label>
+                <div className="inline-flex rounded-lg border border-black/[0.08] bg-light-secondary p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => trocarTipo('pf')}
+                    className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
+                      form.tipo_pessoa === 'pf'
+                        ? 'bg-white text-dark shadow-sm'
+                        : 'text-muted hover:text-dark'
+                    }`}
+                  >
+                    Pessoa Fisica
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => trocarTipo('pj')}
+                    className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
+                      form.tipo_pessoa === 'pj'
+                        ? 'bg-white text-dark shadow-sm'
+                        : 'text-muted hover:text-dark'
+                    }`}
+                  >
+                    Pessoa Juridica
+                  </button>
+                </div>
+              </div>
+
               <div className="grid gap-4 md:grid-cols-2">
-                <div>
+                <div className="md:col-span-2">
                   <label className={label}>Empresa emitente (sua)</label>
                   <select className={input} value={form.empresa_id} onChange={(event) => setForm((current) => ({ ...current, empresa_id: event.target.value }))}>
                     {empresas.map((empresa) => <option key={empresa.id} value={empresa.id}>{empresa.nome}</option>)}
                   </select>
                   <p className="mt-1 text-[11px] text-muted">A qual das suas empresas esse cliente esta vinculado.</p>
                 </div>
-                <div>
-                  <label className={label}>Nome do cliente / Razao social</label>
-                  <input className={input} placeholder="Nome de quem compra" value={form.nome} onChange={(event) => setForm((current) => ({ ...current, nome: event.target.value }))} />
-                </div>
-                <div>
-                  <label className={label}>CPF/CNPJ do cliente</label>
-                  <input className={input} placeholder="So digitos" value={form.cpf_cnpj} onChange={(event) => setForm((current) => ({ ...current, cpf_cnpj: event.target.value }))} />
-                </div>
-                <div>
-                  <label className={label}>Inscricao estadual do cliente (opcional)</label>
-                  <input className={input} value={form.ie} onChange={(event) => setForm((current) => ({ ...current, ie: event.target.value }))} />
-                </div>
+
+                {form.tipo_pessoa === 'pf' ? (
+                  <>
+                    <div>
+                      <label className={label}>Nome completo</label>
+                      <input
+                        className={input}
+                        placeholder="Nome do comprador"
+                        value={form.nome}
+                        onChange={(event) => setForm((current) => ({ ...current, nome: event.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label className={label}>CPF</label>
+                      <input
+                        className={input}
+                        placeholder="000.000.000-00"
+                        maxLength={14}
+                        value={form.cpf_cnpj}
+                        onChange={(event) => setForm((current) => ({ ...current, cpf_cnpj: event.target.value }))}
+                      />
+                      <p className="mt-1 text-[11px] text-muted">11 digitos (so numeros)</p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <label className={label}>Razao social</label>
+                      <input
+                        className={input}
+                        placeholder="Razao social da empresa cliente"
+                        value={form.nome}
+                        onChange={(event) => setForm((current) => ({ ...current, nome: event.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label className={label}>CNPJ</label>
+                      <input
+                        className={input}
+                        placeholder="00.000.000/0000-00"
+                        maxLength={18}
+                        value={form.cpf_cnpj}
+                        onChange={(event) => setForm((current) => ({ ...current, cpf_cnpj: event.target.value }))}
+                      />
+                      <p className="mt-1 text-[11px] text-muted">14 digitos (so numeros)</p>
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className={label}>Inscricao estadual (opcional)</label>
+                      <input
+                        className={input}
+                        placeholder="Deixe vazio se isento"
+                        value={form.ie}
+                        onChange={(event) => setForm((current) => ({ ...current, ie: event.target.value }))}
+                      />
+                    </div>
+                  </>
+                )}
+
                 <div>
                   <label className={label}>Email</label>
-                  <input className={input} value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} />
+                  <input className={input} placeholder="email@exemplo.com" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} />
                 </div>
                 <div>
                   <label className={label}>Telefone</label>
-                  <input className={input} value={form.telefone} onChange={(event) => setForm((current) => ({ ...current, telefone: event.target.value }))} />
+                  <input className={input} placeholder="(00) 00000-0000" value={form.telefone} onChange={(event) => setForm((current) => ({ ...current, telefone: event.target.value }))} />
                 </div>
               </div>
               <div className="grid gap-4 md:grid-cols-3">
