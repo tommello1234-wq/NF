@@ -12,7 +12,6 @@ import { adminProdutosRoutes } from './routes/adminProdutos.js'
 import { adminDarfsRoutes } from './routes/adminDarfs.js'
 import { adminFiscalRoutes } from './routes/adminFiscal.js'
 import { adminNfseRoutes } from './routes/adminNfse.js'
-import { adminNfeRoutes } from './routes/adminNfe.js'
 import { adminTictoRoutes } from './routes/adminTicto.js'
 import { webhooksTictoRoutes } from './routes/webhooksTicto.js'
 
@@ -50,7 +49,6 @@ export async function buildApp() {
   await app.register(adminDarfsRoutes, { prefix: '/admin' })
   await app.register(adminFiscalRoutes, { prefix: '/admin' })
   await app.register(adminNfseRoutes, { prefix: '/admin' })
-  await app.register(adminNfeRoutes, { prefix: '/admin' })
   await app.register(adminTictoRoutes, { prefix: '/admin' })
 
   // Webhooks públicos (sem authAdmin — autenticação via token cadastrado por empresa)
