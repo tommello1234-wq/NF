@@ -7,6 +7,7 @@ import Empresas from './pages/Empresas'
 import EmpresaDetalhe from './pages/EmpresaDetalhe'
 import Notas from './pages/Notas'
 import Nfse from './pages/Nfse'
+import Nfe from './pages/Nfe'
 import Clientes from './pages/Clientes'
 import Produtos from './pages/Produtos'
 import Darfs from './pages/Darfs'
@@ -33,6 +34,7 @@ function Layout({ children }: { children: React.ReactNode }) {
     { to: '/produtos', label: 'Produtos & Serviços', icon: Package },
     { to: '/fiscal', label: 'Fiscal', icon: Settings2 },
     { to: '/nfse', label: 'NFS-e', icon: FileSignature },
+    { to: '/nfe', label: 'NF-e / NFC-e', icon: FileText },
     { to: '/integracoes/ticto', label: 'Integração Ticto', icon: Plug },
     { to: '/notas', label: 'Notas (legado)', icon: FileText },
     { to: '/darfs', label: 'DARF', icon: ReceiptText },
@@ -111,6 +113,7 @@ export default function App() {
       <Route path="/fiscal" element={<RequireAuth><Fiscal /></RequireAuth>} />
       <Route path="/notas" element={<RequireAuth><Notas /></RequireAuth>} />
       <Route path="/nfse" element={<RequireAuth><Nfse /></RequireAuth>} />
+      <Route path="/nfe" element={<RequireAuth><Nfe /></RequireAuth>} />
       <Route path="/integracoes/ticto" element={<RequireAuth><IntegracoesTicto /></RequireAuth>} />
       <Route path="/darfs" element={<RequireAuth><Darfs /></RequireAuth>} />
       <Route path="*" element={<Navigate to="/empresas" replace />} />
