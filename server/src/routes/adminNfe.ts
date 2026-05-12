@@ -37,6 +37,43 @@ const itemSchema = z.object({
   valor_desconto: z.coerce.number().nonnegative().optional(),
 })
 
+const intermediadorSchema = z.object({
+  cnpj: z.string().regex(/^\d{14}$/, 'CNPJ deve ter 14 dígitos'),
+  id_cadastro: z.string().min(1).max(60),
+}).nullable().optional()
+
+const transportadoraSchema = z.object({
+  nome: z.string().max(120).optional().nullable(),
+  cnpj: z.string().optional().nullable(),
+  ie: z.string().max(20).optional().nullable(),
+  uf: z.string().length(2).optional().nullable(),
+}).nullable().optional()
+
+const veiculoSchema = z.object({
+  placa: z.string().max(8),
+  uf: z.string().length(2).optional().nullable(),
+  rntc: z.string().optional().nullable(),
+}).nullable().optional()
+
+const volumeSchema = z.object({
+  qVol: z.coerce.number().int().nonnegative().optional().nullable(),
+  esp: z.string().max(60).optional().nullable(),
+  marca: z.string().max(60).optional().nullable(),
+  nVol: z.string().max(60).optional().nullable(),
+  pesoL: z.coerce.number().nonnegative().optional().nullable(),
+  pesoB: z.coerce.number().nonnegative().optional().nullable(),
+})
+
+const freteSchema = z.object({
+  modalidade: z.coerce.number().int().min(0).max(9),
+  valor: z.coerce.number().nonnegative().optional().nullable(),
+  valor_seguro: z.coerce.number().nonnegative().optional().nullable(),
+  soma_total_nota: z.boolean().optional(),
+  transportadora: transportadoraSchema,
+  veiculo: veiculoSchema,
+  volumes: z.array(volumeSchema).optional(),
+}).optional()
+
 const emitirSchema = z.object({
   empresa_id: z.string().uuid(),
   modelo: z.union([z.literal(55), z.literal(65)]),
@@ -49,6 +86,16 @@ const emitirSchema = z.object({
     troco: z.coerce.number().nonnegative().optional(),
   }),
   informacoes_complementares: z.string().max(5000).optional().nullable(),
+  // Novos (Fase 5)
+  tipo_documento: z.enum([
+    'venda', 'devolucao', 'devolucao_xml', 'remessa_garantia',
+    'remessa_garantia_xml', 'importacao', 'complementar', 'ajuste', 'outros',
+  ]).optional().default('venda'),
+  chave_acesso_referenciada: z.string().regex(/^\d{44}$/).optional().nullable(),
+  intermediador: intermediadorSchema,
+  frete: freteSchema,
+  enviar_email_pos_emissao: z.boolean().optional(),
+  email_destinatario: z.string().email().optional().nullable(),
 })
 
 export async function adminNfeRoutes(app: FastifyInstance) {
@@ -115,6 +162,24 @@ export async function adminNfeRoutes(app: FastifyInstance) {
           troco: body.pagamento.troco,
         },
         informacoesComplementares: body.informacoes_complementares || undefined,
+        tipoDocumento: body.tipo_documento,
+        chaveAcessoReferenciada: body.chave_acesso_referenciada || undefined,
+        intermediador: body.intermediador
+          ? { cnpj: body.intermediador.cnpj, idCadastro: body.intermediador.id_cadastro }
+          : undefined,
+        frete: body.frete
+          ? {
+              modalidade: body.frete.modalidade,
+              valor: body.frete.valor ?? 0,
+              valorSeguro: body.frete.valor_seguro ?? 0,
+              somaTotalNota: body.frete.soma_total_nota ?? true,
+              transportadora: body.frete.transportadora || undefined,
+              veiculo: body.frete.veiculo || undefined,
+              volumes: body.frete.volumes || [],
+            }
+          : undefined,
+        enviarEmailPosEmissao: body.enviar_email_pos_emissao,
+        emailDestinatario: body.email_destinatario || undefined,
       }
       const result = await emitirNfe(input)
       return reply.status(result.status === 'autorizada' ? 200 : 422).send(result)

@@ -73,6 +73,20 @@ export async function emitirNfe(input: NfeInput): Promise<NfeResult> {
     tipoEmissao: 1,
   })
 
+  // Map tipo_documento → finalidade
+  const finalidadeMap: Record<string, 1 | 2 | 3 | 4> = {
+    venda: 1,
+    devolucao: 4,
+    devolucao_xml: 4,
+    remessa_garantia: 1,
+    remessa_garantia_xml: 1,
+    importacao: 1,
+    complementar: 2,
+    ajuste: 3,
+    outros: 1,
+  }
+  const finalidade: 1 | 2 | 3 | 4 = finalidadeMap[input.tipoDocumento || 'venda'] || 1
+
   const buildInput: BuildNfeInput = {
     chaveAcesso: chave,
     cnf,
@@ -82,7 +96,7 @@ export async function emitirNfe(input: NfeInput): Promise<NfeResult> {
     serie,
     numero,
     dataEmissao,
-    finalidade: 1,
+    finalidade,
     consumidorFinal: natureza.consumidor_final ?? true,
     indicadorPresenca: natureza.indicador_presenca ?? 1,
     naturezaOperacao: natureza.natureza,
@@ -105,25 +119,61 @@ export async function emitirNfe(input: NfeInput): Promise<NfeResult> {
     dest,
     itens: itensXml,
     total: calcularTotais(itensXml, input),
-    transp: {
-      modalidadeFrete: input.frete?.modalidade ?? 9,
-      ...(input.frete?.transportadoraCnpj || input.frete?.transportadoraNome
-        ? {
-            transportadora: {
-              cnpj: input.frete.transportadoraCnpj,
-              nome: input.frete.transportadoraNome,
-            },
-          }
-        : {}),
-      ...(input.frete?.veiculoPlaca
-        ? {
-            veiculo: {
-              placa: input.frete.veiculoPlaca,
-              uf: input.frete.veiculoUf || empresa.endereco_uf || 'CE',
-            },
-          }
-        : {}),
-    },
+    transp: (() => {
+      // Frete completo (Fase 5) ou legado
+      const f = input.frete
+      const transp: BuildNfeInput['transp'] = {
+        modalidadeFrete: f?.modalidade ?? 9,
+      }
+      // Transportadora — aceita formato novo ou legado
+      const tNovo = f?.transportadora
+      if (tNovo && (tNovo.cnpj || tNovo.nome)) {
+        transp.transportadora = {
+          cnpj: tNovo.cnpj || undefined,
+          nome: tNovo.nome || undefined,
+          ie: tNovo.ie || undefined,
+          municipio: tNovo.municipio || undefined,
+          uf: tNovo.uf || undefined,
+        }
+      } else if (f?.transportadoraCnpj || f?.transportadoraNome) {
+        transp.transportadora = {
+          cnpj: f.transportadoraCnpj,
+          nome: f.transportadoraNome,
+        }
+      }
+      // Veículo — aceita formato novo ou legado
+      const vNovo = f?.veiculo
+      if (vNovo?.placa) {
+        transp.veiculo = {
+          placa: vNovo.placa,
+          uf: vNovo.uf || empresa.endereco_uf || 'CE',
+          rntc: vNovo.rntc || undefined,
+        }
+      } else if (f?.veiculoPlaca) {
+        transp.veiculo = {
+          placa: f.veiculoPlaca,
+          uf: f.veiculoUf || empresa.endereco_uf || 'CE',
+        }
+      }
+      // Volumes
+      if (f?.volumes && f.volumes.length > 0) {
+        transp.volumes = f.volumes.map((v) => ({
+          qVol: v.qVol ?? undefined,
+          esp: v.esp ?? undefined,
+          marca: v.marca ?? undefined,
+          nVol: v.nVol ?? undefined,
+          pesoL: v.pesoL ?? undefined,
+          pesoB: v.pesoB ?? undefined,
+        }))
+      }
+      return transp
+    })(),
+    ...(input.intermediador
+      ? { intermediador: { cnpj: input.intermediador.cnpj, idCadastro: input.intermediador.idCadastro } }
+      : {}),
+    ...(input.chaveAcessoReferenciada
+      ? { nfReferenciada: { chave: input.chaveAcessoReferenciada } }
+      : {}),
     pag: [
       {
         forma: input.pagamento.forma,
@@ -171,6 +221,7 @@ export async function emitirNfe(input: NfeInput): Promise<NfeResult> {
     numero,
     chave_acesso: chave,
     status: 'aguardando_sefaz',
+    status_detalhado: 'em_processamento',
     natureza_operacao_id: input.naturezaOperacaoId,
     cliente_id: input.clienteId,
     destinatario_nome: dest?.nome,
@@ -178,12 +229,36 @@ export async function emitirNfe(input: NfeInput): Promise<NfeResult> {
     valor_total: buildInput.total.valorTotalNota,
     valor_produtos: buildInput.total.valorProdutos,
     valor_desconto: buildInput.total.valorDesconto,
+    valor_frete: input.frete?.valor ?? 0,
+    valor_seguro: input.frete?.valorSeguro ?? 0,
     qr_code_nfce: qrCode,
     url_consulta_nfce: urlConsulta,
     csc_id_usado: isNfce ? csc.id : null,
     forma_pagamento: input.pagamento.forma,
     valor_pago: input.pagamento.valor,
     troco: input.pagamento.troco,
+    // ---- Fase 5: tipo de documento, intermediador, frete completo, email ----
+    tipo_documento: input.tipoDocumento || 'venda',
+    chave_acesso_referenciada: input.chaveAcessoReferenciada || null,
+    ind_intermed: input.intermediador ? 1 : 0,
+    cnpj_intermediador: input.intermediador?.cnpj || null,
+    id_cadastro_intermediador: input.intermediador?.idCadastro || null,
+    modalidade_frete: input.frete?.modalidade ?? 9,
+    transportadora_nome: input.frete?.transportadora?.nome || null,
+    transportadora_cnpj_cpf: input.frete?.transportadora?.cnpj || null,
+    transportadora_ie: input.frete?.transportadora?.ie || null,
+    transportadora_uf: input.frete?.transportadora?.uf || null,
+    transportadora_municipio: input.frete?.transportadora?.municipio || null,
+    frete_soma_total_nota: input.frete?.somaTotalNota ?? true,
+    veiculo_placa: input.frete?.veiculo?.placa || null,
+    veiculo_uf: input.frete?.veiculo?.uf || null,
+    veiculo_rntc: input.frete?.veiculo?.rntc || null,
+    volumes_quantidade: input.frete?.volumes?.[0]?.qVol ?? null,
+    volumes_especie: input.frete?.volumes?.[0]?.esp || null,
+    volumes_peso_liquido: input.frete?.volumes?.[0]?.pesoL ?? null,
+    volumes_peso_bruto: input.frete?.volumes?.[0]?.pesoB ?? null,
+    enviar_email_pos_emissao: input.enviarEmailPosEmissao ?? false,
+    email_destinatario: input.emailDestinatario || null,
     payload_original: input as unknown as Record<string, unknown>,
   }
 
@@ -500,6 +575,7 @@ async function processarRespostaSefaz(p: ProcessarParams): Promise<NfeResult> {
 
   const updateCompleto: Record<string, unknown> = {
     status: autorizada ? 'autorizada' : denegada ? 'rejeitada' : 'rejeitada',
+    status_detalhado: autorizada ? 'autorizada' : denegada ? 'denegada' : 'rejeitada',
     protocolo: protocolo || null,
     data_autorizacao: autorizada ? new Date().toISOString() : null,
     motivo_rejeicao: autorizada ? null : xMotivo || null,

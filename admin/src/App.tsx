@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Routes, Route, Link, Navigate, useNavigate, useLocation } from 'react-router-dom'
-import { Building2, ShieldCheck, FileSignature, FileText, LogOut, Package, Plug, ReceiptText, Settings2, Users } from 'lucide-react'
+import { Building2, ShieldCheck, FileSignature, FileText, LogOut, Package, Plug, ReceiptText, Settings2, ShoppingCart, Users } from 'lucide-react'
 import { supabase } from './lib/supabase'
 import { EmpresaProvider, useEmpresaAtual } from './lib/empresaContext'
 import Login from './pages/Login'
@@ -11,6 +11,7 @@ import Nfse from './pages/Nfse'
 import Nfe from './pages/Nfe'
 import Clientes from './pages/Clientes'
 import Produtos from './pages/Produtos'
+import Vendas from './pages/Vendas'
 import Darfs from './pages/Darfs'
 import Fiscal from './pages/Fiscal'
 import IntegracoesTicto from './pages/IntegracoesTicto'
@@ -33,6 +34,7 @@ function Layout({ children }: { children: React.ReactNode }) {
     { to: '/empresas', label: 'Empresas', icon: Building2 },
     { to: '/clientes', label: 'Clientes', icon: Users },
     { to: '/produtos', label: 'Produtos & Serviços', icon: Package },
+    { to: '/vendas', label: 'Vendas (NFC-e auto)', icon: ShoppingCart },
     { to: '/fiscal', label: 'Fiscal', icon: Settings2 },
     { to: '/nfse', label: 'NFS-e', icon: FileSignature },
     { to: '/nfe', label: 'NF-e / NFC-e', icon: FileText },
@@ -148,6 +150,7 @@ export default function App() {
       <Route path="/empresas/:id" element={<RequireAuth><EmpresaDetalhe /></RequireAuth>} />
       <Route path="/clientes" element={<RequireAuth><Clientes /></RequireAuth>} />
       <Route path="/produtos" element={<RequireAuth><Produtos /></RequireAuth>} />
+      <Route path="/vendas" element={<RequireAuth><Vendas /></RequireAuth>} />
       <Route path="/fiscal" element={<RequireAuth><Fiscal /></RequireAuth>} />
       <Route path="/notas" element={<RequireAuth><Notas /></RequireAuth>} />
       <Route path="/nfse" element={<RequireAuth><Nfse /></RequireAuth>} />

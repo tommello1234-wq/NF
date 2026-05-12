@@ -45,6 +45,15 @@ export interface BuildNfeInput {
   transp: TranspXml
   pag: PagamentoXml[]
   informacoesComplementares?: string
+  /** Grupo <infIntermed> para vendas em marketplace (indIntermed=1) */
+  intermediador?: IntermediadorXml
+  /** NF referenciada (devolução, complementar, ajuste) — gera <NFref> dentro de <ide> */
+  nfReferenciada?: { chave: string }
+}
+
+export interface IntermediadorXml {
+  cnpj: string
+  idCadastro: string
 }
 
 export interface EmitenteXml {
@@ -100,15 +109,34 @@ export interface ItemXml {
   cstCsosn: string
   aliquotaIcms?: number
   valorIcms?: number
+  /** Alíquota crédito ICMS (CSOSN 101/201) */
+  aliquotaCreditoIcms?: number
+  /** % redução base de cálculo ICMS — usado em CST 20 */
+  percentualReducaoBcIcms?: number
+  /** Alíquota ICMS-ST */
+  aliquotaIcmsSt?: number
+  percentualMva?: number
+  percentualReducaoBcSt?: number
   cstPis: string
   aliquotaPis?: number
   valorPis?: number
+  /** tipo_calculo_pis: 'percentual' (default) | 'valor' (PISQtde) */
+  tipoCalculoPis?: 'percentual' | 'valor'
+  valorUnitarioPis?: number
+  qtdeTotalPis?: number
   cstCofins: string
   aliquotaCofins?: number
   valorCofins?: number
+  tipoCalculoCofins?: 'percentual' | 'valor'
+  valorUnitarioCofins?: number
+  qtdeTotalCofins?: number
   cstIpi?: string
   aliquotaIpi?: number
   valorIpi?: number
+  tipoCalculoIpi?: 'percentual' | 'valor'
+  valorUnitarioIpi?: number
+  qtdeTotalIpi?: number
+  codigoEnquadramentoIpi?: string
   exTipi?: string
   pesoLiquido?: number
   pesoBruto?: number
@@ -136,7 +164,7 @@ export interface TotalXml {
 
 export interface TranspXml {
   modalidadeFrete: number
-  transportadora?: { cnpj?: string; nome?: string; ie?: string; endereco?: string; uf?: string }
+  transportadora?: { cnpj?: string; nome?: string; ie?: string; endereco?: string; municipio?: string; uf?: string }
   veiculo?: { placa: string; uf: string; rntc?: string }
   volumes?: Array<{ qVol?: number; esp?: string; marca?: string; nVol?: string; pesoL?: number; pesoB?: number }>
 }
@@ -168,6 +196,13 @@ export function buildNfeXml(input: BuildNfeInput): { xml: string; idNfe: string 
   infNFe.total = montarTotal(input.total)
   infNFe.transp = montarTransp(input.transp)
   infNFe.pag = montarPag(input.pag)
+  if (input.intermediador) {
+    // <infIntermed> vai entre <pag> e <infAdic>
+    infNFe.infIntermed = {
+      CNPJ: input.intermediador.cnpj,
+      idCadIntTran: input.intermediador.idCadastro,
+    }
+  }
   if (input.informacoesComplementares) {
     infNFe.infAdic = { infCpl: input.informacoesComplementares }
   }
@@ -186,7 +221,14 @@ export function buildNfeXml(input: BuildNfeInput): { xml: string; idNfe: string 
 // (Mantidos como esqueleto; campos opcionais ficam undefined e o builder pula)
 
 function montarIde(input: BuildNfeInput) {
-  return {
+  // Calcula idDest com base no UF emit vs dest
+  const ufEmit = input.emit.endereco.uf
+  const ufDest = input.dest?.endereco?.uf
+  let idDest = '1'                                    // 1=interna (default)
+  if (ufDest && ufDest !== ufEmit) idDest = '2'       // 2=interestadual
+  // EX é só caso especial (operação no exterior) — não cobrimos por enquanto
+
+  const ide: Record<string, unknown> = {
     cUF: '23',                                        // CE
     cNF: input.cnf,
     natOp: input.naturezaOperacao,
@@ -198,7 +240,7 @@ function montarIde(input: BuildNfeInput) {
       ? { dhSaiEnt: toIsoUtc(input.dataSaida) }
       : {}),
     tpNF: '1',                                        // 1=saída
-    idDest: '1',                                      // 1=interna, 2=interestadual, 3=exterior  TODO calcular
+    idDest,
     cMunFG: input.emit.endereco.codigoMunicipio,
     tpImp: input.modelo === 65 ? '4' : '1',           // 1=retrato, 4=DANFE NFC-e
     tpEmis: '1',                                      // 1=normal
@@ -207,9 +249,15 @@ function montarIde(input: BuildNfeInput) {
     finNFe: String(input.finalidade),
     indFinal: input.consumidorFinal ? '1' : '0',
     indPres: String(input.indicadorPresenca),
+    // indIntermed obrigatório quando finNFe=1 e indPres em {1,5} — sinaliza marketplace.
+    indIntermed: input.intermediador ? '1' : '0',
     procEmi: '0',                                     // 0=aplicativo do contribuinte
     verProc: 'NF-API-1.0',
   }
+  if (input.nfReferenciada?.chave) {
+    ide.NFref = { refNFe: input.nfReferenciada.chave }
+  }
+  return ide
 }
 
 function montarEmit(e: EmitenteXml) {
@@ -370,16 +418,41 @@ function montarImposto(item: ItemXml, interestadual: boolean, crt: 1 | 2 | 3 | 4
     COFINS: { [grupoCofins(item.cstCofins)]: cofinsPayload(item) },
   }
 
-  if (item.cstIpi && item.aliquotaIpi != null) {
-    const vIpi = (item.valorTotal * item.aliquotaIpi) / 100
-    imposto.IPI = {
-      ...(item.exTipi ? { cEnq: item.exTipi } : { cEnq: '999' }),
-      IPITrib: {
-        CST: item.cstIpi,
-        vBC: item.valorTotal.toFixed(2),
-        pIPI: item.aliquotaIpi.toFixed(2),
-        vIPI: vIpi.toFixed(2),
-      },
+  if (item.cstIpi) {
+    // CST IPI tributados: 00, 49, 50, 99 → IPITrib  | Não tributados: 01-05, 51-55 → IPINT
+    const tributados = ['00', '49', '50', '99']
+    const cEnq = item.codigoEnquadramentoIpi || item.exTipi || '999'
+    if (tributados.includes(item.cstIpi)) {
+      if (item.tipoCalculoIpi === 'valor') {
+        const qUnid = item.qtdeTotalIpi ?? item.quantidadeComercial
+        const vUnid = item.valorUnitarioIpi ?? 0
+        imposto.IPI = {
+          cEnq,
+          IPITrib: {
+            CST: item.cstIpi,
+            qUnid: qUnid.toFixed(4),
+            vUnid: vUnid.toFixed(4),
+            vIPI: (qUnid * vUnid).toFixed(2),
+          },
+        }
+      } else {
+        const aliq = item.aliquotaIpi || 0
+        imposto.IPI = {
+          cEnq,
+          IPITrib: {
+            CST: item.cstIpi,
+            vBC: item.valorTotal.toFixed(2),
+            pIPI: aliq.toFixed(2),
+            vIPI: ((item.valorTotal * aliq) / 100).toFixed(2),
+          },
+        }
+      }
+    } else {
+      // Não tributado / suspenso / imune / isento
+      imposto.IPI = {
+        cEnq,
+        IPINT: { CST: item.cstIpi },
+      }
     }
   }
 
@@ -461,6 +534,16 @@ function pisPayload(item: ItemXml): Record<string, unknown> {
       vPIS: ((item.valorTotal * (item.aliquotaPis || 0)) / 100).toFixed(2),
     }
   }
+  if (grupo === 'PISQtde') {
+    const qBC = item.qtdeTotalPis ?? item.quantidadeComercial
+    const vAliq = item.valorUnitarioPis ?? 0
+    return {
+      CST: item.cstPis,
+      qBCProd: qBC.toFixed(4),
+      vAliqProd: vAliq.toFixed(4),
+      vPIS: (qBC * vAliq).toFixed(2),
+    }
+  }
   // PISOutr e demais — pra Simples Nacional (CST 49/99) vai zerado
   return {
     CST: item.cstPis,
@@ -481,6 +564,16 @@ function cofinsPayload(item: ItemXml): Record<string, unknown> {
       vCOFINS: ((item.valorTotal * (item.aliquotaCofins || 0)) / 100).toFixed(2),
     }
   }
+  if (grupo === 'COFINSQtde') {
+    const qBC = item.qtdeTotalCofins ?? item.quantidadeComercial
+    const vAliq = item.valorUnitarioCofins ?? 0
+    return {
+      CST: item.cstCofins,
+      qBCProd: qBC.toFixed(4),
+      vAliqProd: vAliq.toFixed(4),
+      vCOFINS: (qBC * vAliq).toFixed(2),
+    }
+  }
   return {
     CST: item.cstCofins,
     vBC: '0.00',
@@ -497,6 +590,7 @@ function montarTransp(t: TranspXml) {
       ...(t.transportadora.nome ? { xNome: t.transportadora.nome } : {}),
       ...(t.transportadora.ie ? { IE: t.transportadora.ie } : {}),
       ...(t.transportadora.endereco ? { xEnder: t.transportadora.endereco } : {}),
+      ...(t.transportadora.municipio ? { xMun: t.transportadora.municipio } : {}),
       ...(t.transportadora.uf ? { UF: t.transportadora.uf } : {}),
     }
   }

@@ -219,7 +219,7 @@ async function emitir(
       frete: body.frete
         ? {
             modalidade: body.frete.modalidade,
-            valorFrete: body.frete.valor_frete,
+            valor: body.frete.valor_frete,
             valorSeguro: body.frete.valor_seguro,
           }
         : undefined,

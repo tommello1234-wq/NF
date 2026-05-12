@@ -96,6 +96,18 @@ export interface NfeInput {
   pagamento: PagamentoInput
   frete?: FreteInput
   informacoesComplementares?: string
+  /** Tipo de documento (espelha o seletor "+ Nova Nota" do ssOtica) */
+  tipoDocumento?: 'venda' | 'devolucao' | 'devolucao_xml' | 'remessa_garantia'
+    | 'remessa_garantia_xml' | 'importacao' | 'complementar' | 'ajuste' | 'outros'
+  /** Chave de NF referenciada (44 dígitos) — devolução / complementar / ajuste */
+  chaveAcessoReferenciada?: string
+  /** Intermediador / marketplace (gera <infIntermed>) */
+  intermediador?: {
+    cnpj: string
+    idCadastro: string
+  }
+  enviarEmailPosEmissao?: boolean
+  emailDestinatario?: string
 }
 
 export interface ItemInput {
@@ -124,15 +136,38 @@ export interface PagamentoInput {
 }
 
 export interface FreteInput {
-  modalidade: 0 | 1 | 2 | 3 | 4 | 9
-  //  0=Por conta emitente, 1=Por conta destinatário, 2=Por conta terceiros,
-  //  3=Transp. próprio remetente, 4=Transp. próprio destinatário, 9=Sem frete
+  modalidade: number  // 0..9 (0=CIF emit, 1=FOB dest, 2=terceiros, 3/4=próprio, 9=sem frete)
+  /** Compat legado */
   transportadoraCnpj?: string
   transportadoraNome?: string
   veiculoPlaca?: string
   veiculoUf?: string
-  valorFrete?: number
+  valor?: number
   valorSeguro?: number
+  somaTotalNota?: boolean
+  /** Transportadora completa (Fase 5) */
+  transportadora?: {
+    nome?: string | null
+    cnpj?: string | null
+    ie?: string | null
+    uf?: string | null
+    municipio?: string | null
+  } | null
+  /** Veículo completo */
+  veiculo?: {
+    placa: string
+    uf?: string | null
+    rntc?: string | null
+  } | null
+  /** Volumes */
+  volumes?: Array<{
+    qVol?: number | null
+    esp?: string | null
+    marca?: string | null
+    nVol?: string | null
+    pesoL?: number | null
+    pesoB?: number | null
+  }>
 }
 
 export interface DestinatarioOverride {

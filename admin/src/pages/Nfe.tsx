@@ -172,8 +172,26 @@ export default function NfePage() {
   const [loading, setLoading] = useState(false)
   const [showModal, setShowModal] = useState(false)
   const [filtroModelo, setFiltroModelo] = useState<string>('')
+  const [tabStatus, setTabStatus] = useState<string>('emitidas')
   const [verificacao, setVerificacao] = useState<VerificacaoSefaz | null>(null)
   const [verificando, setVerificando] = useState<string | null>(null)
+
+  // Buckets para tabs estilo ssOtica
+  function tabDe(n: NotaFiscal): string {
+    const s = String(n.status || '').toLowerCase()
+    if (s === 'autorizada' || s === 'emitida_teste') return 'emitidas'
+    if (s === 'rascunho') return 'rascunhos'
+    if (s === 'em_processamento' || s === 'aguardando_sefaz') return 'em_processamento'
+    if (s === 'cancelada') return 'canceladas'
+    if (s === 'denegada') return 'denegadas'
+    if (s === 'rejeitada') return 'rejeitadas'
+    if (s === 'falha_comunicacao') return 'falha_comunicacao'
+    if (s === 'contingencia_offline_rejeitada') return 'contingencia'
+    if (s === 'inutilizada') return 'inutilizadas'
+    return 'outras'
+  }
+  const notasFiltradas = notas.filter((n) => tabDe(n) === tabStatus)
+  const contagem = (tab: string) => notas.filter((n) => tabDe(n) === tab).length
 
   async function verificarNaSefaz(notaId: string) {
     setVerificando(notaId)
@@ -284,6 +302,40 @@ export default function NfePage() {
         </select>
       </div>
 
+      {/* Tabs de status (estilo ssOtica) */}
+      <div className="flex flex-wrap gap-1 border-b border-black/[0.06]">
+        {[
+          { k: 'emitidas', label: 'Emitidas' },
+          { k: 'rascunhos', label: 'Rascunhos' },
+          { k: 'em_processamento', label: 'Em Processamento' },
+          { k: 'contingencia', label: 'Contingência Off. Rejeitadas' },
+          { k: 'falha_comunicacao', label: 'Falha de Comunicação' },
+          { k: 'canceladas', label: 'Canceladas' },
+          { k: 'denegadas', label: 'Denegadas' },
+          { k: 'rejeitadas', label: 'Rejeitadas' },
+          { k: 'inutilizadas', label: 'Inutilizadas' },
+        ].map((tab) => {
+          const active = tabStatus === tab.k
+          const count = contagem(tab.k)
+          return (
+            <button
+              key={tab.k}
+              onClick={() => setTabStatus(tab.k)}
+              className={`whitespace-nowrap border-b-2 px-3 py-2 text-xs font-medium transition-colors ${
+                active ? 'border-accent text-accent' : 'border-transparent text-muted hover:text-dark'
+              }`}
+            >
+              {tab.label}
+              {count > 0 && (
+                <span className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${active ? 'bg-accent text-white' : 'bg-neutral-100 text-neutral-600'}`}>
+                  {count}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+
       <div className="rounded-lg border bg-white">
         <table className="w-full text-sm">
           <thead className="bg-neutral-50 text-left text-xs uppercase text-neutral-500">
@@ -305,14 +357,16 @@ export default function NfePage() {
                   Carregando...
                 </td>
               </tr>
-            ) : notas.length === 0 ? (
+            ) : notasFiltradas.length === 0 ? (
               <tr>
                 <td colSpan={8} className="px-3 py-6 text-center text-neutral-400">
-                  Nenhuma nota emitida ainda.
+                  {notas.length === 0
+                    ? 'Nenhuma nota emitida ainda.'
+                    : `Nenhuma nota nesta aba (${tabStatus.replace(/_/g, ' ')}).`}
                 </td>
               </tr>
             ) : (
-              notas.map((n) => {
+              notasFiltradas.map((n) => {
                 const modeloLabel =
                   n.modelo === 65 ? 'NFC-e' : n.modelo === 55 ? 'NF-e' : n.tipo === 'nfce' ? 'NFC-e' : n.tipo === 'nfe' ? 'NF-e' : '-'
                 return (
@@ -543,8 +597,13 @@ function StatusBadge({ status }: { status: string }) {
     rejeitada: 'bg-red-100 text-red-700',
     cancelada: 'bg-neutral-200 text-neutral-700',
     aguardando_sefaz: 'bg-yellow-100 text-yellow-800',
+    em_processamento: 'bg-yellow-100 text-yellow-800',
     emitida_teste: 'bg-blue-100 text-blue-700',
     rascunho: 'bg-neutral-100 text-neutral-600',
+    denegada: 'bg-orange-100 text-orange-700',
+    inutilizada: 'bg-stone-200 text-stone-700',
+    falha_comunicacao: 'bg-rose-100 text-rose-700',
+    contingencia_offline_rejeitada: 'bg-amber-100 text-amber-800',
   }
   return (
     <span className={`rounded px-2 py-0.5 text-xs font-medium ${map[status] || 'bg-neutral-100'}`}>
@@ -576,6 +635,34 @@ function EmitirModal({
   const [valorPago, setValorPago] = useState<number>(0)
   const [obs, setObs] = useState('')
   const [emitindo, setEmitindo] = useState(false)
+  // Novos campos (Fase 5)
+  const [tipoDocumento, setTipoDocumento] = useState('venda')
+  const [chaveReferenciada, setChaveReferenciada] = useState('')
+  // Intermediador
+  const [mostrarIntermediador, setMostrarIntermediador] = useState(false)
+  const [indIntermed, setIndIntermed] = useState<0 | 1>(0)
+  const [cnpjIntermediador, setCnpjIntermediador] = useState('')
+  const [idCadastroIntermediador, setIdCadastroIntermediador] = useState('')
+  // Frete
+  const [mostrarFrete, setMostrarFrete] = useState(false)
+  const [modalidadeFrete, setModalidadeFrete] = useState('9') // 9 = sem frete
+  const [transpNome, setTranspNome] = useState('')
+  const [transpCnpj, setTranspCnpj] = useState('')
+  const [transpIe, setTranspIe] = useState('')
+  const [transpUf, setTranspUf] = useState('')
+  const [veicPlaca, setVeicPlaca] = useState('')
+  const [veicUf, setVeicUf] = useState('')
+  const [veicRntc, setVeicRntc] = useState('')
+  const [volQtde, setVolQtde] = useState<number>(0)
+  const [volEspecie, setVolEspecie] = useState('')
+  const [pesoLiquido, setPesoLiquido] = useState<number>(0)
+  const [pesoBruto, setPesoBruto] = useState<number>(0)
+  const [valorFrete, setValorFrete] = useState<number>(0)
+  const [valorSeguro, setValorSeguro] = useState<number>(0)
+  const [freteSomaTotal, setFreteSomaTotal] = useState(true)
+  // Envio por email
+  const [enviarEmail, setEnviarEmail] = useState(false)
+  const [emailDestinatario, setEmailDestinatario] = useState('')
 
   useEffect(() => {
     if (!empresaId) return
@@ -611,6 +698,14 @@ function EmitirModal({
       toast.error('Preencha empresa, natureza e ao menos um item')
       return
     }
+    if ((tipoDocumento === 'devolucao' || tipoDocumento === 'complementar' || tipoDocumento === 'ajuste') && !chaveReferenciada.trim()) {
+      toast.error('Tipos devolução/complementar/ajuste exigem chave da NF referenciada (44 dígitos)')
+      return
+    }
+    if (indIntermed === 1 && (!cnpjIntermediador.trim() || !idCadastroIntermediador.trim())) {
+      toast.error('Marketplace marcado — preencha CNPJ e Identificador do Intermediador')
+      return
+    }
     setEmitindo(true)
     try {
       const res = await apiPost<{ status: string; numero?: number; chaveAcesso?: string }>(
@@ -620,6 +715,8 @@ function EmitirModal({
           modelo,
           natureza_operacao_id: naturezaId,
           cliente_id: clienteId || null,
+          tipo_documento: tipoDocumento,
+          chave_acesso_referenciada: chaveReferenciada.trim() || null,
           itens: itens.map((it) => ({
             produto_id: it.produto_id,
             quantidade: it.quantidade,
@@ -628,6 +725,33 @@ function EmitirModal({
           })),
           pagamento: { forma, valor: valorPago || valorTotal },
           informacoes_complementares: obs || null,
+          // Intermediador / Marketplace
+          intermediador: indIntermed === 1
+            ? { cnpj: cnpjIntermediador.replace(/\D/g, ''), id_cadastro: idCadastroIntermediador.trim() }
+            : null,
+          // Frete completo
+          frete: {
+            modalidade: Number(modalidadeFrete),
+            valor: valorFrete || 0,
+            valor_seguro: valorSeguro || 0,
+            soma_total_nota: freteSomaTotal,
+            transportadora: transpNome ? {
+              nome: transpNome,
+              cnpj: transpCnpj.replace(/\D/g, '') || null,
+              ie: transpIe || null,
+              uf: transpUf || null,
+            } : null,
+            veiculo: veicPlaca ? { placa: veicPlaca, uf: veicUf, rntc: veicRntc || null } : null,
+            volumes: volQtde > 0 ? [{
+              qVol: volQtde,
+              esp: volEspecie || null,
+              pesoL: pesoLiquido || null,
+              pesoB: pesoBruto || null,
+            }] : [],
+          },
+          // Envio por email
+          enviar_email_pos_emissao: enviarEmail,
+          email_destinatario: emailDestinatario.trim() || null,
         },
       )
       if (res.status === 'autorizada') {
@@ -673,6 +797,35 @@ function EmitirModal({
               <option value={55}>NF-e (55)</option>
             </select>
           </Field>
+
+          <Field label="Tipo de documento">
+            <select
+              value={tipoDocumento}
+              onChange={(e) => setTipoDocumento(e.target.value)}
+              className="w-full rounded border px-2 py-1.5 text-sm"
+            >
+              <option value="venda">Nota Fiscal de Venda</option>
+              <option value="devolucao">Nota Fiscal de Devolução</option>
+              <option value="devolucao_xml">Devolução por XML</option>
+              <option value="remessa_garantia">Remessa em Garantia</option>
+              <option value="remessa_garantia_xml">Remessa em Garantia por XML</option>
+              <option value="importacao">Nota Fiscal de Importação</option>
+              <option value="complementar">Complementar</option>
+              <option value="ajuste">Ajuste</option>
+              <option value="outros">Outros tipos</option>
+            </select>
+          </Field>
+
+          {(tipoDocumento === 'devolucao' || tipoDocumento === 'complementar' || tipoDocumento === 'ajuste') && (
+            <Field label="Chave da NF referenciada (44 dígitos)">
+              <input
+                value={chaveReferenciada}
+                onChange={(e) => setChaveReferenciada(e.target.value.replace(/\D/g, '').slice(0, 44))}
+                placeholder="0000000000000000000000000000000000000000000"
+                className="w-full rounded border px-2 py-1.5 text-sm font-mono"
+              />
+            </Field>
+          )}
 
           <Field label="Natureza de operação">
             <select
@@ -797,6 +950,229 @@ function EmitirModal({
             className="w-full rounded border px-2 py-1.5 text-sm"
           />
         </Field>
+
+        {/* Intermediador / Marketplace */}
+        <div className="mt-4 rounded-lg border border-black/[0.06]">
+          <button
+            type="button"
+            onClick={() => setMostrarIntermediador((v) => !v)}
+            className="flex w-full items-center justify-between px-3 py-2 text-sm font-medium hover:bg-neutral-50"
+          >
+            <span>Informações de Intermediador / Marketplace</span>
+            <ChevronDown size={14} className={`transition-transform ${mostrarIntermediador ? 'rotate-180' : ''}`} />
+          </button>
+          {mostrarIntermediador && (
+            <div className="space-y-3 border-t border-black/[0.06] p-3">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={indIntermed === 1}
+                  onChange={(e) => setIndIntermed(e.target.checked ? 1 : 0)}
+                />
+                Operação intermediada (marketplace/site de terceiros)
+              </label>
+              {indIntermed === 1 && (
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="CNPJ do intermediador">
+                    <input
+                      value={cnpjIntermediador}
+                      onChange={(e) => setCnpjIntermediador(e.target.value)}
+                      placeholder="14 dígitos"
+                      className="w-full rounded border px-2 py-1.5 text-sm"
+                    />
+                  </Field>
+                  <Field label="Identificador do cadastro">
+                    <input
+                      value={idCadastroIntermediador}
+                      onChange={(e) => setIdCadastroIntermediador(e.target.value)}
+                      placeholder="ex: seller-123"
+                      className="w-full rounded border px-2 py-1.5 text-sm"
+                    />
+                  </Field>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Frete completo */}
+        <div className="mt-3 rounded-lg border border-black/[0.06]">
+          <button
+            type="button"
+            onClick={() => setMostrarFrete((v) => !v)}
+            className="flex w-full items-center justify-between px-3 py-2 text-sm font-medium hover:bg-neutral-50"
+          >
+            <span>Despesas Acessórias e Frete</span>
+            <ChevronDown size={14} className={`transition-transform ${mostrarFrete ? 'rotate-180' : ''}`} />
+          </button>
+          {mostrarFrete && (
+            <div className="space-y-3 border-t border-black/[0.06] p-3">
+              <div className="grid grid-cols-3 gap-3">
+                <Field label="Modalidade do frete">
+                  <select
+                    value={modalidadeFrete}
+                    onChange={(e) => setModalidadeFrete(e.target.value)}
+                    className="w-full rounded border px-2 py-1.5 text-sm"
+                  >
+                    <option value="0">0 — Por conta do emitente (CIF)</option>
+                    <option value="1">1 — Por conta do destinatário (FOB)</option>
+                    <option value="2">2 — Por conta de terceiros</option>
+                    <option value="3">3 — Próprio por conta do remetente</option>
+                    <option value="4">4 — Próprio por conta do destinatário</option>
+                    <option value="9">9 — Sem ocorrência de transporte</option>
+                  </select>
+                </Field>
+                <Field label="Valor do frete (R$)">
+                  <input
+                    type="number"
+                    step={0.01}
+                    value={valorFrete}
+                    onChange={(e) => setValorFrete(Number(e.target.value))}
+                    className="w-full rounded border px-2 py-1.5 text-sm"
+                  />
+                </Field>
+                <Field label="Valor do seguro (R$)">
+                  <input
+                    type="number"
+                    step={0.01}
+                    value={valorSeguro}
+                    onChange={(e) => setValorSeguro(Number(e.target.value))}
+                    className="w-full rounded border px-2 py-1.5 text-sm"
+                  />
+                </Field>
+              </div>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={freteSomaTotal}
+                  onChange={(e) => setFreteSomaTotal(e.target.checked)}
+                />
+                Frete soma no total da nota
+              </label>
+              <div className="text-xs font-semibold text-muted-dark">Transportadora</div>
+              <div className="grid grid-cols-4 gap-3">
+                <Field label="Nome / Razão social">
+                  <input
+                    value={transpNome}
+                    onChange={(e) => setTranspNome(e.target.value)}
+                    className="w-full rounded border px-2 py-1.5 text-sm"
+                  />
+                </Field>
+                <Field label="CNPJ">
+                  <input
+                    value={transpCnpj}
+                    onChange={(e) => setTranspCnpj(e.target.value)}
+                    className="w-full rounded border px-2 py-1.5 text-sm"
+                  />
+                </Field>
+                <Field label="IE">
+                  <input
+                    value={transpIe}
+                    onChange={(e) => setTranspIe(e.target.value)}
+                    className="w-full rounded border px-2 py-1.5 text-sm"
+                  />
+                </Field>
+                <Field label="UF">
+                  <input
+                    value={transpUf}
+                    onChange={(e) => setTranspUf(e.target.value.toUpperCase().slice(0, 2))}
+                    className="w-full rounded border px-2 py-1.5 text-sm"
+                  />
+                </Field>
+              </div>
+              <div className="text-xs font-semibold text-muted-dark">Veículo</div>
+              <div className="grid grid-cols-3 gap-3">
+                <Field label="Placa">
+                  <input
+                    value={veicPlaca}
+                    onChange={(e) => setVeicPlaca(e.target.value.toUpperCase())}
+                    placeholder="AAA0000"
+                    className="w-full rounded border px-2 py-1.5 text-sm"
+                  />
+                </Field>
+                <Field label="UF da placa">
+                  <input
+                    value={veicUf}
+                    onChange={(e) => setVeicUf(e.target.value.toUpperCase().slice(0, 2))}
+                    className="w-full rounded border px-2 py-1.5 text-sm"
+                  />
+                </Field>
+                <Field label="RNTC do veículo">
+                  <input
+                    value={veicRntc}
+                    onChange={(e) => setVeicRntc(e.target.value)}
+                    className="w-full rounded border px-2 py-1.5 text-sm"
+                  />
+                </Field>
+              </div>
+              <div className="text-xs font-semibold text-muted-dark">Volumes</div>
+              <div className="grid grid-cols-4 gap-3">
+                <Field label="Quantidade">
+                  <input
+                    type="number"
+                    min={0}
+                    value={volQtde}
+                    onChange={(e) => setVolQtde(Number(e.target.value))}
+                    className="w-full rounded border px-2 py-1.5 text-sm"
+                  />
+                </Field>
+                <Field label="Espécie">
+                  <input
+                    value={volEspecie}
+                    onChange={(e) => setVolEspecie(e.target.value)}
+                    placeholder="caixa, pacote..."
+                    className="w-full rounded border px-2 py-1.5 text-sm"
+                  />
+                </Field>
+                <Field label="Peso líquido total (kg)">
+                  <input
+                    type="number"
+                    step={0.001}
+                    min={0}
+                    value={pesoLiquido}
+                    onChange={(e) => setPesoLiquido(Number(e.target.value))}
+                    className="w-full rounded border px-2 py-1.5 text-sm"
+                  />
+                </Field>
+                <Field label="Peso bruto total (kg)">
+                  <input
+                    type="number"
+                    step={0.001}
+                    min={0}
+                    value={pesoBruto}
+                    onChange={(e) => setPesoBruto(Number(e.target.value))}
+                    className="w-full rounded border px-2 py-1.5 text-sm"
+                  />
+                </Field>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Envio por email */}
+        <div className="mt-3 rounded-lg border border-black/[0.06] p-3">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={enviarEmail}
+              onChange={(e) => setEnviarEmail(e.target.checked)}
+            />
+            Enviar DANFE e XML por email após emitir
+          </label>
+          {enviarEmail && (
+            <div className="mt-2">
+              <Field label="Email do destinatário">
+                <input
+                  type="email"
+                  value={emailDestinatario}
+                  onChange={(e) => setEmailDestinatario(e.target.value)}
+                  placeholder="email@exemplo.com"
+                  className="w-full rounded border px-2 py-1.5 text-sm"
+                />
+              </Field>
+            </div>
+          )}
+        </div>
 
         <div className="mt-6 flex justify-end gap-2">
           <button onClick={onClose} className="rounded border px-4 py-2 text-sm">
