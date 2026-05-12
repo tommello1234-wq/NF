@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
-import { Download, FileText, Plus, RefreshCw } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { AlertTriangle, Download, FileText, Plus, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { apiDownload, apiGet, apiPost } from '../lib/api'
+import { useEmpresaAtual } from '../lib/empresaContext'
 
 interface Empresa {
   id: string
@@ -87,13 +88,15 @@ function downloadBlob(blob: Blob, filename: string) {
 }
 
 export default function Notas() {
-  const [empresas, setEmpresas] = useState<Empresa[]>([])
+  const { empresaId } = useEmpresaAtual()
+  const [empresaDetalhe, setEmpresaDetalhe] = useState<Empresa | null>(null)
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [produtos, setProdutos] = useState<Produto[]>([])
   const [naturezas, setNaturezas] = useState<NaturezaOperacao[]>([])
   const [notas, setNotas] = useState<Nota[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [showLegacyForm, setShowLegacyForm] = useState(false)
   const [form, setForm] = useState({
     empresa_id: '',
     natureza_operacao_id: '',
@@ -110,28 +113,41 @@ export default function Notas() {
   })
 
   useEffect(() => {
-    loadInitial()
+    loadNotas()
   }, [])
 
-  async function loadInitial() {
-    try {
-      const empresasData = await apiGet<Empresa[]>('/admin/empresas')
-      setEmpresas(empresasData)
-      if (empresasData[0]) {
-        setForm((current) => ({ ...current, empresa_id: empresasData[0].id, serie: empresasData[0].serie_nfe || 1 }))
-        await loadCadastros(empresasData[0].id)
-      }
-      await loadNotas()
-    } catch (err) {
-      toast.error('Erro ao carregar notas', { description: (err as Error).message })
+  useEffect(() => {
+    if (!empresaId) {
+      setEmpresaDetalhe(null)
+      setClientes([])
+      setProdutos([])
+      setNaturezas([])
+      setForm((c) => ({ ...c, empresa_id: '', natureza_operacao_id: '', cliente_id: '', produto_id: '' }))
+      return
     }
-  }
+    apiGet<Empresa>(`/admin/empresas/${empresaId}`)
+      .then((emp) => {
+        setEmpresaDetalhe(emp)
+        setForm((c) => ({
+          ...c,
+          empresa_id: empresaId,
+          serie: c.tipo === 'nfce' ? emp.serie_nfce || 1 : emp.serie_nfe || 1,
+        }))
+      })
+      .catch(() => setEmpresaDetalhe(null))
+    loadCadastros(empresaId)
+  }, [empresaId])
 
-  async function loadCadastros(empresaId: string) {
+  const notasFiltradas = useMemo(
+    () => (empresaId ? notas.filter((n) => n.empresa_id === empresaId) : notas),
+    [notas, empresaId],
+  )
+
+  async function loadCadastros(eid: string) {
     const [clientesData, produtosData, naturezasData] = await Promise.all([
-      apiGet<Cliente[]>(`/admin/clientes?empresa_id=${empresaId}&ativo=true`).catch(() => []),
-      apiGet<Produto[]>(`/admin/produtos?empresa_id=${empresaId}&ativo=true`).catch(() => []),
-      apiGet<NaturezaOperacao[]>(`/admin/naturezas-operacao?empresa_id=${empresaId}&ativo=true`).catch(() => []),
+      apiGet<Cliente[]>(`/admin/clientes?empresa_id=${eid}&ativo=true`).catch(() => []),
+      apiGet<Produto[]>(`/admin/produtos?empresa_id=${eid}&ativo=true`).catch(() => []),
+      apiGet<NaturezaOperacao[]>(`/admin/naturezas-operacao?empresa_id=${eid}&ativo=true`).catch(() => []),
     ])
     setClientes(clientesData)
     setProdutos(produtosData)
@@ -142,21 +158,8 @@ export default function Notas() {
     }))
   }
 
-  async function changeEmpresa(empresaId: string) {
-    const empresa = empresas.find((item) => item.id === empresaId)
-    setForm((current) => ({
-      ...current,
-      empresa_id: empresaId,
-      natureza_operacao_id: '',
-      cliente_id: '',
-      produto_id: '',
-      serie: current.tipo === 'nfce' ? empresa?.serie_nfce || 1 : empresa?.serie_nfe || 1,
-    }))
-    if (empresaId) await loadCadastros(empresaId)
-  }
-
   function changeTipo(tipo: string) {
-    const empresa = empresas.find((item) => item.id === form.empresa_id)
+    const empresa = empresaDetalhe
     setForm((current) => ({
       ...current,
       tipo,
@@ -267,8 +270,8 @@ export default function Notas() {
             <FileText size={20} className="text-accent" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-dark">Pre-NF-e</h1>
-            <p className="text-sm text-muted">XML 4.00 e DANFE de conferencia antes da transmissao SEFAZ</p>
+            <h1 className="text-2xl font-bold text-dark">Notas emitidas</h1>
+            <p className="text-sm text-muted">Historico de notas geradas pelo sistema</p>
           </div>
         </div>
         <button
@@ -279,26 +282,48 @@ export default function Notas() {
         </button>
       </div>
 
+      <div className="flex items-start gap-3 rounded-lg border border-warning/30 bg-warning-bg p-4 text-sm text-warning">
+        <AlertTriangle size={18} className="mt-0.5 flex-shrink-0" />
+        <div>
+          <p className="font-semibold">Em transicao para NFS-e Padrao Nacional</p>
+          <p className="mt-1 text-xs leading-relaxed">
+            Para infoproduto o caminho oficial e <strong>NFS-e Padrao Nacional</strong> (gov.br/nfse), em construcao nas proximas fases.
+            O fluxo abaixo gera <strong>pre-NF-e modelo 55 sem assinatura</strong> (nao tem validade fiscal) e ficara aqui por compatibilidade ate a NFS-e estar pronta.
+          </p>
+          {!showLegacyForm && (
+            <button
+              onClick={() => setShowLegacyForm(true)}
+              className="mt-2 rounded-lg border border-warning/40 bg-white px-3 py-1.5 text-xs font-medium text-warning hover:bg-warning/5"
+            >
+              Mostrar emissao de pre-NF-e (legado)
+            </button>
+          )}
+        </div>
+      </div>
+
+      {showLegacyForm && (
       <section className="rounded-lg border border-black/[0.06] bg-white p-5">
-        <div className="mb-4 flex items-center gap-2">
-          <Plus size={18} className="text-accent" />
-          <h2 className="font-semibold text-dark">Gerar pre-NF-e</h2>
+        <div className="mb-4 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Plus size={18} className="text-accent" />
+            <h2 className="font-semibold text-dark">Gerar pre-NF-e (legado)</h2>
+          </div>
+          <button
+            onClick={() => setShowLegacyForm(false)}
+            className="rounded-lg border border-black/[0.08] bg-white px-3 py-1.5 text-xs hover:bg-light-secondary"
+          >
+            Ocultar
+          </button>
         </div>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <div className="xl:col-span-2">
             <label className={label}>Empresa emitente</label>
-            <select
+            <input
               className={input}
-              value={form.empresa_id}
-              onChange={(event) => changeEmpresa(event.target.value)}
-            >
-              <option value="">Selecione</option>
-              {empresas.map((empresa) => (
-                <option key={empresa.id} value={empresa.id}>
-                  {empresa.nome} - {empresa.cnpj}
-                </option>
-              ))}
-            </select>
+              value={empresaDetalhe ? `${empresaDetalhe.nome} - ${empresaDetalhe.cnpj}` : '—'}
+              disabled
+              readOnly
+            />
           </div>
           <div>
             <label className={label}>Tipo</label>
@@ -444,6 +469,7 @@ export default function Notas() {
           </button>
         </div>
       </section>
+      )}
 
       <section className="overflow-hidden rounded-lg border border-black/[0.06] bg-white">
         <table className="w-full text-sm">
@@ -461,9 +487,9 @@ export default function Notas() {
           <tbody>
             {loading ? (
               <tr><td colSpan={7} className="px-4 py-8 text-center text-muted">Carregando...</td></tr>
-            ) : notas.length === 0 ? (
+            ) : notasFiltradas.length === 0 ? (
               <tr><td colSpan={7} className="px-4 py-12 text-center text-muted">Nenhuma nota gerada.</td></tr>
-            ) : notas.map((nota) => (
+            ) : notasFiltradas.map((nota) => (
               <tr key={nota.id} className="border-b border-black/[0.04] hover:bg-light-secondary">
                 <td className="px-4 py-3">
                   <div className="font-semibold text-dark">{nota.numero || '-'}</div>

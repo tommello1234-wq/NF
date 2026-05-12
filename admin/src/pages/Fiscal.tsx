@@ -1,13 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Edit2, Plus, RefreshCw, Settings2, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { apiDelete, apiGet, apiPatch, apiPost } from '../lib/api'
-
-interface Empresa {
-  id: string
-  nome: string
-  cnpj: string
-}
+import { useEmpresaAtual } from '../lib/empresaContext'
 
 interface NaturezaOperacao {
   id: string
@@ -44,37 +39,20 @@ function onlyDigits(value: string) {
 }
 
 export default function Fiscal() {
-  const [empresas, setEmpresas] = useState<Empresa[]>([])
+  const { empresaId, empresaAtual } = useEmpresaAtual()
   const [naturezas, setNaturezas] = useState<NaturezaOperacao[]>([])
-  const [empresaId, setEmpresaId] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [showModal, setShowModal] = useState(false)
   const [form, setForm] = useState<NaturezaOperacao>(emptyNatureza)
 
-  const empresaAtual = useMemo(() => empresas.find((empresa) => empresa.id === empresaId), [empresas, empresaId])
-
-  useEffect(() => {
-    loadInitial()
-  }, [])
-
   useEffect(() => {
     if (empresaId) loadNaturezas(empresaId)
-  }, [empresaId])
-
-  async function loadInitial() {
-    setLoading(true)
-    try {
-      const empresasData = await apiGet<Empresa[]>('/admin/empresas')
-      setEmpresas(empresasData)
-      setEmpresaId(empresasData[0]?.id || '')
-      if (!empresasData[0]) setNaturezas([])
-    } catch (err) {
-      toast.error('Erro ao carregar empresas', { description: (err as Error).message })
-    } finally {
+    else {
+      setNaturezas([])
       setLoading(false)
     }
-  }
+  }, [empresaId])
 
   async function loadNaturezas(id = empresaId) {
     if (!id) return
@@ -158,11 +136,6 @@ export default function Fiscal() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <select className={input} value={empresaId} onChange={(event) => setEmpresaId(event.target.value)}>
-            {empresas.map((empresa) => (
-              <option key={empresa.id} value={empresa.id}>{empresa.nome}</option>
-            ))}
-          </select>
           <button
             onClick={() => loadNaturezas()}
             className="inline-flex items-center gap-2 rounded-lg border border-black/[0.08] bg-white px-4 py-2 text-sm hover:bg-light-secondary"
@@ -243,11 +216,7 @@ export default function Fiscal() {
               <div className="grid gap-4 md:grid-cols-2">
                 <div>
                   <label className={label}>Empresa</label>
-                  <select className={input} value={form.empresa_id} onChange={(event) => setForm((current) => ({ ...current, empresa_id: event.target.value }))}>
-                    {empresas.map((empresa) => (
-                      <option key={empresa.id} value={empresa.id}>{empresa.nome}</option>
-                    ))}
-                  </select>
+                  <input className={input} value={empresaAtual?.nome || empresaAtual?.razao_social || '—'} disabled readOnly />
                 </div>
                 <div>
                   <label className={label}>Nome interno</label>

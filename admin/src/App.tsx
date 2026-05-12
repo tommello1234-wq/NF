@@ -1,15 +1,19 @@
 import { useEffect, useState } from 'react'
 import { Routes, Route, Link, Navigate, useNavigate, useLocation } from 'react-router-dom'
-import { Building2, ShieldCheck, FileText, LogOut, Package, ReceiptText, Settings2, Users } from 'lucide-react'
+import { Building2, ShieldCheck, FileSignature, FileText, LogOut, Package, Plug, ReceiptText, Settings2, Users } from 'lucide-react'
 import { supabase } from './lib/supabase'
+import { EmpresaProvider, useEmpresaAtual } from './lib/empresaContext'
 import Login from './pages/Login'
 import Empresas from './pages/Empresas'
 import EmpresaDetalhe from './pages/EmpresaDetalhe'
 import Notas from './pages/Notas'
+import Nfse from './pages/Nfse'
+import Nfe from './pages/Nfe'
 import Clientes from './pages/Clientes'
 import Produtos from './pages/Produtos'
 import Darfs from './pages/Darfs'
 import Fiscal from './pages/Fiscal'
+import IntegracoesTicto from './pages/IntegracoesTicto'
 
 function Layout({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate()
@@ -28,9 +32,12 @@ function Layout({ children }: { children: React.ReactNode }) {
   const nav = [
     { to: '/empresas', label: 'Empresas', icon: Building2 },
     { to: '/clientes', label: 'Clientes', icon: Users },
-    { to: '/produtos', label: 'Produtos', icon: Package },
+    { to: '/produtos', label: 'Produtos & Serviços', icon: Package },
     { to: '/fiscal', label: 'Fiscal', icon: Settings2 },
-    { to: '/notas', label: 'Notas Emitidas', icon: FileText },
+    { to: '/nfse', label: 'NFS-e', icon: FileSignature },
+    { to: '/nfe', label: 'NF-e / NFC-e', icon: FileText },
+    { to: '/integracoes/ticto', label: 'Integração Ticto', icon: Plug },
+    { to: '/notas', label: 'Notas (legado)', icon: FileText },
     { to: '/darfs', label: 'DARF', icon: ReceiptText },
   ]
 
@@ -71,7 +78,40 @@ function Layout({ children }: { children: React.ReactNode }) {
           </button>
         </div>
       </aside>
-      <main className="flex-1 overflow-y-auto p-6">{children}</main>
+      <main className="flex-1 overflow-y-auto">
+        <EmpresaTopBar />
+        <div className="p-6">{children}</div>
+      </main>
+    </div>
+  )
+}
+
+function EmpresaTopBar() {
+  const location = useLocation()
+  const { empresas, empresaId, setEmpresaId, loading } = useEmpresaAtual()
+  // Telas que não fazem sentido o filtro global (já mostram tudo ou já têm um detalhe específico).
+  if (location.pathname.startsWith('/empresas')) return null
+
+  return (
+    <div className="sticky top-0 z-30 flex items-center gap-3 border-b border-accent/20 bg-accent/10 px-6 py-2 shadow-sm backdrop-blur">
+      <Building2 size={14} className="text-accent" />
+      <span className="text-xs font-medium text-muted-dark">Empresa selecionada:</span>
+      <select
+        value={empresaId}
+        onChange={(e) => setEmpresaId(e.target.value)}
+        disabled={loading || empresas.length === 0}
+        className="rounded-md border border-accent/30 bg-white px-2 py-1 text-sm font-medium text-dark focus:outline-none focus:ring-2 focus:ring-accent/50"
+      >
+        {empresas.length === 0 && <option value="">— sem empresas cadastradas —</option>}
+        {empresas.map((e) => (
+          <option key={e.id} value={e.id}>
+            {e.nome || e.razao_social}
+          </option>
+        ))}
+      </select>
+      <span className="text-[11px] text-muted-dark/80">
+        compartilhada com todas as outras abas — trocar aqui afeta clientes, produtos, NF-e, etc.
+      </span>
     </div>
   )
 }
@@ -93,7 +133,11 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 
   if (loading) return <div className="flex h-screen items-center justify-center text-muted">Carregando...</div>
   if (!logged) return <Navigate to="/login" replace />
-  return <Layout>{children}</Layout>
+  return (
+    <EmpresaProvider>
+      <Layout>{children}</Layout>
+    </EmpresaProvider>
+  )
 }
 
 export default function App() {
@@ -106,6 +150,9 @@ export default function App() {
       <Route path="/produtos" element={<RequireAuth><Produtos /></RequireAuth>} />
       <Route path="/fiscal" element={<RequireAuth><Fiscal /></RequireAuth>} />
       <Route path="/notas" element={<RequireAuth><Notas /></RequireAuth>} />
+      <Route path="/nfse" element={<RequireAuth><Nfse /></RequireAuth>} />
+      <Route path="/nfe" element={<RequireAuth><Nfe /></RequireAuth>} />
+      <Route path="/integracoes/ticto" element={<RequireAuth><IntegracoesTicto /></RequireAuth>} />
       <Route path="/darfs" element={<RequireAuth><Darfs /></RequireAuth>} />
       <Route path="*" element={<Navigate to="/empresas" replace />} />
     </Routes>

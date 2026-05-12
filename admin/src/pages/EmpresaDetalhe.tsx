@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { apiDelete, apiGet, apiPatch, apiPost, apiUpload } from '../lib/api'
+import { camposPendentes, camposPendentesSet, type EmpresaCampos } from '../lib/camposPendentes'
 
 interface Empresa {
   id: string
@@ -40,12 +41,26 @@ interface Empresa {
   uf_sefaz: string | null
   csc_id: string | null
   csc_token: string | null
+  csc_id_homol?: string | null
+  csc_token_homol?: string | null
+  csc_id_prod?: string | null
+  csc_token_prod?: string | null
   serie_nfe?: number
   proximo_numero_nfe?: number
   serie_nfce?: number
   proximo_numero_nfce?: number
   tipo_emissao_habilitado?: 'teste_local' | 'nfe' | 'nfce' | 'nfe_nfce'
   status_fiscal?: 'incompleta' | 'pronta_homologacao' | 'pronta_producao'
+  // NFS-e Padrão Nacional
+  inscricao_municipal?: string | null
+  municipio_emissor_codigo?: string | null
+  regime_especial_tributacao?: string | null
+  incentivo_fiscal?: boolean | null
+  nfse_ambiente?: number | null
+  serie_dps?: number | null
+  proximo_numero_dps?: number | null
+  nfse_codigo_lc116_padrao?: string | null
+  nfse_codigo_tributario_municipal_padrao?: string | null
 }
 
 interface CertStatus {
@@ -99,11 +114,24 @@ const emptyForm = {
   uf_sefaz: 'CE',
   csc_id: '',
   csc_token: '',
+  csc_id_homol: '',
+  csc_token_homol: '',
+  csc_id_prod: '',
+  csc_token_prod: '',
   serie_nfe: 1,
   proximo_numero_nfe: 1,
   serie_nfce: 1,
   proximo_numero_nfce: 1,
   tipo_emissao_habilitado: 'teste_local',
+  inscricao_municipal: '',
+  municipio_emissor_codigo: '',
+  nfse_ambiente: 2,
+  serie_dps: 1,
+  proximo_numero_dps: 1,
+  nfse_codigo_lc116_padrao: '',
+  nfse_codigo_tributario_municipal_padrao: '',
+  regime_especial_tributacao: '',
+  incentivo_fiscal: false,
 }
 
 function onlyDigits(value: string) {
@@ -142,11 +170,24 @@ function toForm(empresa: Empresa) {
     uf_sefaz: empresa.uf_sefaz || empresa.endereco_uf || 'CE',
     csc_id: empresa.csc_id || '',
     csc_token: empresa.csc_token || '',
+    csc_id_homol: empresa.csc_id_homol || empresa.csc_id || '',
+    csc_token_homol: empresa.csc_token_homol || empresa.csc_token || '',
+    csc_id_prod: empresa.csc_id_prod || '',
+    csc_token_prod: empresa.csc_token_prod || '',
     serie_nfe: empresa.serie_nfe || 1,
     proximo_numero_nfe: empresa.proximo_numero_nfe || 1,
     serie_nfce: empresa.serie_nfce || 1,
     proximo_numero_nfce: empresa.proximo_numero_nfce || 1,
     tipo_emissao_habilitado: empresa.tipo_emissao_habilitado || 'teste_local',
+    inscricao_municipal: empresa.inscricao_municipal || '',
+    municipio_emissor_codigo: empresa.municipio_emissor_codigo || empresa.endereco_codigo_ibge || '',
+    nfse_ambiente: empresa.nfse_ambiente || 2,
+    serie_dps: empresa.serie_dps || 1,
+    proximo_numero_dps: empresa.proximo_numero_dps || 1,
+    nfse_codigo_lc116_padrao: empresa.nfse_codigo_lc116_padrao || '',
+    nfse_codigo_tributario_municipal_padrao: empresa.nfse_codigo_tributario_municipal_padrao || '',
+    regime_especial_tributacao: empresa.regime_especial_tributacao || '',
+    incentivo_fiscal: Boolean(empresa.incentivo_fiscal),
   }
 }
 
@@ -317,7 +358,18 @@ export default function EmpresaDetalhe() {
   if (!empresa) return <div className="text-error">Empresa nao encontrada</div>
 
   const input = 'w-full rounded-lg border border-black/[0.08] bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30'
+  const inputErr = 'w-full rounded-lg border border-error/60 bg-error-bg/30 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-error/40'
   const label = 'mb-1 block text-xs font-medium text-muted-dark'
+
+  // Campos pendentes pra emitir — vinculados ao FORM ATUAL (não ao empresa do banco), pra
+  // que a borda vermelha suma assim que você digita.
+  const pendentesSet = camposPendentesSet(form as EmpresaCampos)
+  const pendentesList = camposPendentes(form as EmpresaCampos)
+  const cls = (campo: string) => {
+    // CSC token homol acompanha CSC id homol — ambos avermelham juntos.
+    const ehCscToken = campo === 'csc_token_homol' && pendentesSet.has('csc_id_homol')
+    return pendentesSet.has(campo) || ehCscToken ? inputErr : input
+  }
   const certCfg = cert && {
     valido: { bg: 'bg-success-bg', text: 'text-success', Icon: CheckCircle, label: 'Valido' },
     vencendo: { bg: 'bg-warning-bg', text: 'text-warning', Icon: Clock, label: `Vence em ${cert.diasRestantes} dias` },
@@ -345,6 +397,28 @@ export default function EmpresaDetalhe() {
         </button>
       </div>
 
+      {pendentesList.length > 0 && (
+        <div className="rounded-lg border border-error/30 bg-error-bg/50 p-4 text-sm text-error">
+          <div className="mb-1 flex items-center gap-2 font-semibold">
+            <AlertCircle size={16} /> Empresa incompleta — não pode emitir NF-e/NFC-e
+          </div>
+          <div className="mb-2 text-xs text-error/90">
+            Os campos abaixo precisam ser preenchidos antes de você conseguir emitir notas. Pode salvar mesmo assim
+            e voltar depois — só a emissão fica bloqueada.
+          </div>
+          <ul className="ml-4 list-disc text-xs text-error/90">
+            {pendentesList.map((p) => (
+              <li key={p.campo}>
+                <strong>{p.label}</strong>
+                {p.obrigatorio_para !== 'ambos' && (
+                  <span className="ml-1 text-[10px] text-error/70">(obrigatório só pra {p.obrigatorio_para})</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <section className="rounded-lg border border-black/[0.06] bg-white p-5">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
@@ -363,15 +437,15 @@ export default function EmpresaDetalhe() {
           </div>
           <div>
             <label className={label}>Razao social</label>
-            <input className={input} value={form.razao_social} onChange={(event) => setForm((current) => ({ ...current, razao_social: event.target.value }))} />
+            <input className={cls('razao_social')} value={form.razao_social} onChange={(event) => setForm((current) => ({ ...current, razao_social: event.target.value }))} />
           </div>
           <div>
             <label className={label}>CNPJ</label>
-            <input className={input} value={form.cnpj} onChange={(event) => setForm((current) => ({ ...current, cnpj: event.target.value }))} />
+            <input className={cls('cnpj')} value={form.cnpj} onChange={(event) => setForm((current) => ({ ...current, cnpj: event.target.value }))} />
           </div>
           <div>
             <label className={label}>Inscricao estadual</label>
-            <input className={input} value={form.ie} onChange={(event) => setForm((current) => ({ ...current, ie: event.target.value }))} />
+            <input className={cls('ie')} value={form.ie} onChange={(event) => setForm((current) => ({ ...current, ie: event.target.value }))} />
           </div>
           <div>
             <label className={label}>Inscricao municipal</label>
@@ -388,7 +462,7 @@ export default function EmpresaDetalhe() {
           </div>
           <div>
             <label className={label}>CRT</label>
-            <select className={input} value={form.crt} onChange={(event) => setForm((current) => ({ ...current, crt: Number(event.target.value) }))}>
+            <select className={cls('crt')} value={form.crt} onChange={(event) => setForm((current) => ({ ...current, crt: Number(event.target.value) }))}>
               <option value={1}>1 - Simples</option>
               <option value={2}>2 - Simples excesso</option>
               <option value={3}>3 - Normal</option>
@@ -409,31 +483,31 @@ export default function EmpresaDetalhe() {
         <div className="mt-4 grid gap-4 md:grid-cols-3 xl:grid-cols-6">
           <div className="md:col-span-2">
             <label className={label}>Logradouro</label>
-            <input className={input} value={form.endereco_logradouro} onChange={(event) => setForm((current) => ({ ...current, endereco_logradouro: event.target.value }))} />
+            <input className={cls('endereco_logradouro')} value={form.endereco_logradouro} onChange={(event) => setForm((current) => ({ ...current, endereco_logradouro: event.target.value }))} />
           </div>
           <div>
             <label className={label}>Numero</label>
-            <input className={input} value={form.endereco_numero} onChange={(event) => setForm((current) => ({ ...current, endereco_numero: event.target.value }))} />
+            <input className={cls('endereco_numero')} value={form.endereco_numero} onChange={(event) => setForm((current) => ({ ...current, endereco_numero: event.target.value }))} />
           </div>
           <div>
             <label className={label}>Bairro</label>
-            <input className={input} value={form.endereco_bairro} onChange={(event) => setForm((current) => ({ ...current, endereco_bairro: event.target.value }))} />
+            <input className={cls('endereco_bairro')} value={form.endereco_bairro} onChange={(event) => setForm((current) => ({ ...current, endereco_bairro: event.target.value }))} />
           </div>
           <div>
             <label className={label}>Cidade</label>
-            <input className={input} value={form.endereco_cidade} onChange={(event) => setForm((current) => ({ ...current, endereco_cidade: event.target.value }))} />
+            <input className={cls('endereco_cidade')} value={form.endereco_cidade} onChange={(event) => setForm((current) => ({ ...current, endereco_cidade: event.target.value }))} />
           </div>
           <div>
             <label className={label}>UF</label>
-            <input className={input} maxLength={2} value={form.endereco_uf} onChange={(event) => setForm((current) => ({ ...current, endereco_uf: event.target.value.toUpperCase().slice(0, 2) }))} />
+            <input className={cls('endereco_uf')} maxLength={2} value={form.endereco_uf} onChange={(event) => setForm((current) => ({ ...current, endereco_uf: event.target.value.toUpperCase().slice(0, 2) }))} />
           </div>
           <div>
             <label className={label}>CEP</label>
-            <input className={input} value={form.endereco_cep} onChange={(event) => setForm((current) => ({ ...current, endereco_cep: event.target.value }))} />
+            <input className={cls('endereco_cep')} value={form.endereco_cep} onChange={(event) => setForm((current) => ({ ...current, endereco_cep: event.target.value }))} />
           </div>
           <div>
             <label className={label}>Codigo IBGE</label>
-            <input className={input} value={form.endereco_codigo_ibge} onChange={(event) => setForm((current) => ({ ...current, endereco_codigo_ibge: event.target.value }))} />
+            <input className={cls('endereco_codigo_ibge')} value={form.endereco_codigo_ibge} onChange={(event) => setForm((current) => ({ ...current, endereco_codigo_ibge: event.target.value }))} />
           </div>
           <div>
             <label className={label}>Email</label>
@@ -474,13 +548,72 @@ export default function EmpresaDetalhe() {
             <input className={input} type="number" min={1} value={form.proximo_numero_nfce} onChange={(event) => setForm((current) => ({ ...current, proximo_numero_nfce: Number(event.target.value) }))} />
           </div>
           <div>
-            <label className={label}>CSC ID</label>
-            <input className={input} value={form.csc_id} onChange={(event) => setForm((current) => ({ ...current, csc_id: event.target.value }))} />
+            <label className={label}>CSC ID (legado)</label>
+            <input className={input} value={form.csc_id} onChange={(event) => setForm((current) => ({ ...current, csc_id: event.target.value }))} placeholder="usado se homol/prod estiverem vazios" />
           </div>
           <div>
-            <label className={label}>CSC Token</label>
+            <label className={label}>CSC Token (legado)</label>
             <input className={input} type="password" value={form.csc_token} onChange={(event) => setForm((current) => ({ ...current, csc_token: event.target.value }))} />
           </div>
+        </div>
+
+        <div className="mt-6 border-t border-black/[0.06] pt-4">
+          <h3 className="mb-3 text-sm font-semibold text-dark">CSC NFC-e por ambiente</h3>
+          <p className="mb-3 text-xs text-muted">A SEFAZ-CE entrega CSC distintos para homologação e produção. O orquestrador escolhe o par certo conforme o ambiente vigente da empresa.</p>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div>
+              <label className={label}>CSC ID (homologação)</label>
+              <input className={cls('csc_id_homol')} value={form.csc_id_homol} onChange={(event) => setForm((current) => ({ ...current, csc_id_homol: event.target.value }))} placeholder="000001" />
+            </div>
+            <div>
+              <label className={label}>CSC Token (homologação)</label>
+              <input className={cls('csc_token_homol')} type="password" value={form.csc_token_homol} onChange={(event) => setForm((current) => ({ ...current, csc_token_homol: event.target.value }))} />
+            </div>
+            <div>
+              <label className={label}>CSC ID (produção)</label>
+              <input className={input} value={form.csc_id_prod} onChange={(event) => setForm((current) => ({ ...current, csc_id_prod: event.target.value }))} placeholder="só preencher quando promover" />
+            </div>
+            <div>
+              <label className={label}>CSC Token (produção)</label>
+              <input className={input} type="password" value={form.csc_token_prod} onChange={(event) => setForm((current) => ({ ...current, csc_token_prod: event.target.value }))} />
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-6 border-t border-black/[0.06] pt-4">
+          <h3 className="mb-3 text-sm font-semibold text-dark">NFS-e (Padrão Nacional gov.br/nfse)</h3>
+          <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
+            <div>
+              <label className={label}>Inscrição Municipal</label>
+              <input className={input} value={form.inscricao_municipal} onChange={(event) => setForm((current) => ({ ...current, inscricao_municipal: event.target.value }))} placeholder="IM da prefeitura emissora" />
+            </div>
+            <div>
+              <label className={label}>Cod. IBGE Município emissor</label>
+              <input className={input} maxLength={7} value={form.municipio_emissor_codigo} onChange={(event) => setForm((current) => ({ ...current, municipio_emissor_codigo: event.target.value.replace(/\D/g, '').slice(0,7) }))} placeholder="2309003" />
+            </div>
+            <div>
+              <label className={label}>Ambiente NFS-e</label>
+              <select className={input} value={form.nfse_ambiente} onChange={(event) => setForm((current) => ({ ...current, nfse_ambiente: Number(event.target.value) }))}>
+                <option value={2}>Homologação (Produção Restrita)</option>
+                <option value={1}>Produção (notas reais)</option>
+              </select>
+            </div>
+            <div>
+              <label className={label}>Série DPS</label>
+              <input className={input} type="number" min={1} value={form.serie_dps} onChange={(event) => setForm((current) => ({ ...current, serie_dps: Number(event.target.value) }))} />
+            </div>
+            <div>
+              <label className={label}>Próx. nº DPS</label>
+              <input className={input} type="number" min={1} value={form.proximo_numero_dps} onChange={(event) => setForm((current) => ({ ...current, proximo_numero_dps: Number(event.target.value) }))} />
+            </div>
+            <div>
+              <label className={label}>Cód. LC 116 padrão</label>
+              <input className={input} value={form.nfse_codigo_lc116_padrao} onChange={(event) => setForm((current) => ({ ...current, nfse_codigo_lc116_padrao: event.target.value }))} placeholder="ex: 010501" />
+            </div>
+          </div>
+          <p className="mt-3 text-[11px] text-muted">
+            ME no Simples Nacional geralmente recolhe ISS via DAS — confirme com o contador antes de emitir em produção.
+          </p>
         </div>
       </section>
 

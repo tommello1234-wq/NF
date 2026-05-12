@@ -1,13 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Edit2, Plus, RefreshCw, Trash2, Users, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { apiDelete, apiGet, apiPatch, apiPost } from '../lib/api'
-
-interface Empresa {
-  id: string
-  nome: string
-  cnpj: string
-}
+import { useEmpresaAtual } from '../lib/empresaContext'
 
 interface Cliente {
   id: string
@@ -27,9 +22,12 @@ interface Cliente {
   ativo: boolean
 }
 
+type TipoPessoa = 'pf' | 'pj'
+
 const emptyForm = {
   id: '',
   empresa_id: '',
+  tipo_pessoa: 'pf' as TipoPessoa,
   nome: '',
   cpf_cnpj: '',
   ie: '',
@@ -45,6 +43,35 @@ const emptyForm = {
   ativo: true,
 }
 
+function inferTipo(doc: string): TipoPessoa {
+  return onlyDigits(doc).length === 14 ? 'pj' : 'pf'
+}
+
+interface ViaCepResponse {
+  cep?: string
+  logradouro?: string
+  complemento?: string
+  bairro?: string
+  localidade?: string
+  uf?: string
+  ibge?: string
+  erro?: boolean | string
+}
+
+async function consultaCep(cep: string): Promise<ViaCepResponse | null> {
+  const digits = onlyDigits(cep)
+  if (digits.length !== 8) return null
+  try {
+    const res = await fetch(`https://viacep.com.br/ws/${digits}/json/`)
+    if (!res.ok) return null
+    const data = (await res.json()) as ViaCepResponse
+    if (data.erro) return null
+    return data
+  } catch {
+    return null
+  }
+}
+
 function onlyDigits(value: string) {
   return value.replace(/\D/g, '')
 }
@@ -57,36 +84,20 @@ function formatDoc(value: string) {
 }
 
 export default function Clientes() {
-  const [empresas, setEmpresas] = useState<Empresa[]>([])
+  const { empresaId, empresaAtual } = useEmpresaAtual()
   const [clientes, setClientes] = useState<Cliente[]>([])
-  const [empresaId, setEmpresaId] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [showModal, setShowModal] = useState(false)
   const [form, setForm] = useState(emptyForm)
 
-  const empresaAtual = useMemo(() => empresas.find((empresa) => empresa.id === empresaId), [empresas, empresaId])
-
-  useEffect(() => {
-    loadInitial()
-  }, [])
-
   useEffect(() => {
     if (empresaId) loadClientes(empresaId)
-  }, [empresaId])
-
-  async function loadInitial() {
-    setLoading(true)
-    try {
-      const empresasData = await apiGet<Empresa[]>('/admin/empresas')
-      setEmpresas(empresasData)
-      setEmpresaId(empresasData[0]?.id || '')
-      if (!empresasData[0]) setClientes([])
-    } catch (err) {
-      toast.error('Erro ao carregar empresas', { description: (err as Error).message })
+    else {
+      setClientes([])
       setLoading(false)
     }
-  }
+  }, [empresaId])
 
   async function loadClientes(id = empresaId) {
     if (!id) return
@@ -109,6 +120,7 @@ export default function Clientes() {
     setForm({
       id: cliente.id,
       empresa_id: cliente.empresa_id,
+      tipo_pessoa: inferTipo(cliente.cpf_cnpj || ''),
       nome: cliente.nome || '',
       cpf_cnpj: cliente.cpf_cnpj || '',
       ie: cliente.ie || '',
@@ -126,15 +138,60 @@ export default function Clientes() {
     setShowModal(true)
   }
 
+  function trocarTipo(novo: TipoPessoa) {
+    setForm((current) => ({
+      ...current,
+      tipo_pessoa: novo,
+      // PF não tem IE — limpa quando troca pra PF
+      ie: novo === 'pf' ? '' : current.ie,
+    }))
+  }
+
+  const [buscandoCep, setBuscandoCep] = useState(false)
+
+  async function handleCepChange(novoCep: string) {
+    setForm((current) => ({ ...current, endereco_cep: novoCep }))
+    const digits = onlyDigits(novoCep)
+    if (digits.length !== 8) return
+    setBuscandoCep(true)
+    try {
+      const data = await consultaCep(digits)
+      if (!data) {
+        toast.warning('CEP não encontrado')
+        return
+      }
+      setForm((current) => ({
+        ...current,
+        endereco_logradouro: data.logradouro || current.endereco_logradouro,
+        endereco_bairro: data.bairro || current.endereco_bairro,
+        endereco_cidade: data.localidade || current.endereco_cidade,
+        endereco_uf: (data.uf || current.endereco_uf || 'CE').toUpperCase().slice(0, 2),
+        endereco_codigo_ibge: data.ibge || current.endereco_codigo_ibge,
+      }))
+    } finally {
+      setBuscandoCep(false)
+    }
+  }
+
   async function save() {
     if (!form.empresa_id || !form.nome.trim() || !form.cpf_cnpj.trim()) {
       toast.warning('Preencha empresa, nome e CPF/CNPJ')
       return
     }
 
+    const docDigits = onlyDigits(form.cpf_cnpj)
+    const docEsperado = form.tipo_pessoa === 'pf' ? 11 : 14
+    if (docDigits.length !== docEsperado) {
+      toast.warning(form.tipo_pessoa === 'pf' ? 'CPF deve ter 11 dígitos' : 'CNPJ deve ter 14 dígitos')
+      return
+    }
+
+    // tipo_pessoa é só pra UI — não vai pro backend
+    const { tipo_pessoa: _ignored, ...rest } = form
+    void _ignored
     const payload = {
-      ...form,
-      cpf_cnpj: onlyDigits(form.cpf_cnpj),
+      ...rest,
+      cpf_cnpj: docDigits,
       endereco_uf: form.endereco_uf.toUpperCase().slice(0, 2),
     }
 
@@ -179,11 +236,6 @@ export default function Clientes() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <select className={input} value={empresaId} onChange={(event) => setEmpresaId(event.target.value)}>
-            {empresas.map((empresa) => (
-              <option key={empresa.id} value={empresa.id}>{empresa.nome}</option>
-            ))}
-          </select>
           <button onClick={() => loadClientes()} className="inline-flex items-center gap-2 rounded-lg border border-black/[0.08] bg-white px-4 py-2 text-sm hover:bg-light-secondary">
             <RefreshCw size={14} /> Atualizar
           </button>
@@ -248,70 +300,170 @@ export default function Clientes() {
               <button onClick={() => setShowModal(false)}><X size={18} /></button>
             </div>
             <div className="max-h-[72vh] space-y-4 overflow-y-auto p-5">
+              <div className="rounded-lg border border-info/20 bg-info-bg p-3 text-xs text-info">
+                Cadastre aqui as <strong>pessoas que compram de voce</strong> (tomadores do servico).
+                Os campos sao dados do <strong>cliente</strong>, nao da sua empresa.
+              </div>
+
+              {/* Toggle PF / PJ */}
+              <div>
+                <label className={label}>Tipo de cliente</label>
+                <div className="inline-flex rounded-lg border border-black/[0.08] bg-light-secondary p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => trocarTipo('pf')}
+                    className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
+                      form.tipo_pessoa === 'pf'
+                        ? 'bg-white text-dark shadow-sm'
+                        : 'text-muted hover:text-dark'
+                    }`}
+                  >
+                    Pessoa Fisica
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => trocarTipo('pj')}
+                    className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
+                      form.tipo_pessoa === 'pj'
+                        ? 'bg-white text-dark shadow-sm'
+                        : 'text-muted hover:text-dark'
+                    }`}
+                  >
+                    Pessoa Juridica
+                  </button>
+                </div>
+              </div>
+
               <div className="grid gap-4 md:grid-cols-2">
-                <div>
-                  <label className={label}>Empresa</label>
-                  <select className={input} value={form.empresa_id} onChange={(event) => setForm((current) => ({ ...current, empresa_id: event.target.value }))}>
-                    {empresas.map((empresa) => <option key={empresa.id} value={empresa.id}>{empresa.nome}</option>)}
-                  </select>
+                <div className="md:col-span-2">
+                  <label className={label}>Empresa emitente (sua)</label>
+                  <input className={input} value={empresaAtual?.nome || empresaAtual?.razao_social || '—'} disabled readOnly />
+                  <p className="mt-1 text-[11px] text-muted">Cliente vinculado à empresa selecionada na barra superior.</p>
                 </div>
-                <div>
-                  <label className={label}>Nome/Razao social</label>
-                  <input className={input} value={form.nome} onChange={(event) => setForm((current) => ({ ...current, nome: event.target.value }))} />
-                </div>
-                <div>
-                  <label className={label}>CPF/CNPJ</label>
-                  <input className={input} value={form.cpf_cnpj} onChange={(event) => setForm((current) => ({ ...current, cpf_cnpj: event.target.value }))} />
-                </div>
-                <div>
-                  <label className={label}>Inscricao estadual</label>
-                  <input className={input} value={form.ie} onChange={(event) => setForm((current) => ({ ...current, ie: event.target.value }))} />
-                </div>
+
+                {form.tipo_pessoa === 'pf' ? (
+                  <>
+                    <div>
+                      <label className={label}>Nome completo</label>
+                      <input
+                        className={input}
+                        placeholder="Nome do comprador"
+                        value={form.nome}
+                        onChange={(event) => setForm((current) => ({ ...current, nome: event.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label className={label}>CPF</label>
+                      <input
+                        className={input}
+                        placeholder="000.000.000-00"
+                        maxLength={14}
+                        value={form.cpf_cnpj}
+                        onChange={(event) => setForm((current) => ({ ...current, cpf_cnpj: event.target.value }))}
+                      />
+                      <p className="mt-1 text-[11px] text-muted">11 digitos (so numeros)</p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <label className={label}>Razao social</label>
+                      <input
+                        className={input}
+                        placeholder="Razao social da empresa cliente"
+                        value={form.nome}
+                        onChange={(event) => setForm((current) => ({ ...current, nome: event.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label className={label}>CNPJ</label>
+                      <input
+                        className={input}
+                        placeholder="00.000.000/0000-00"
+                        maxLength={18}
+                        value={form.cpf_cnpj}
+                        onChange={(event) => setForm((current) => ({ ...current, cpf_cnpj: event.target.value }))}
+                      />
+                      <p className="mt-1 text-[11px] text-muted">14 digitos (so numeros)</p>
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className={label}>Inscricao estadual (opcional)</label>
+                      <input
+                        className={input}
+                        placeholder="Deixe vazio se isento"
+                        value={form.ie}
+                        onChange={(event) => setForm((current) => ({ ...current, ie: event.target.value }))}
+                      />
+                    </div>
+                  </>
+                )}
+
                 <div>
                   <label className={label}>Email</label>
-                  <input className={input} value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} />
+                  <input className={input} placeholder="email@exemplo.com" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} />
                 </div>
                 <div>
                   <label className={label}>Telefone</label>
-                  <input className={input} value={form.telefone} onChange={(event) => setForm((current) => ({ ...current, telefone: event.target.value }))} />
+                  <input className={input} placeholder="(00) 00000-0000" value={form.telefone} onChange={(event) => setForm((current) => ({ ...current, telefone: event.target.value }))} />
                 </div>
               </div>
-              <div className="grid gap-4 md:grid-cols-3">
-                <div>
-                  <label className={label}>Logradouro</label>
-                  <input className={input} value={form.endereco_logradouro} onChange={(event) => setForm((current) => ({ ...current, endereco_logradouro: event.target.value }))} />
-                </div>
-                <div>
-                  <label className={label}>Numero</label>
-                  <input className={input} value={form.endereco_numero} onChange={(event) => setForm((current) => ({ ...current, endereco_numero: event.target.value }))} />
-                </div>
-                <div>
-                  <label className={label}>Bairro</label>
-                  <input className={input} value={form.endereco_bairro} onChange={(event) => setForm((current) => ({ ...current, endereco_bairro: event.target.value }))} />
+              <div className="border-t border-black/[0.06] pt-4">
+                <h4 className="mb-3 text-xs font-semibold uppercase text-muted">Endereco do cliente</h4>
+                <div className="grid gap-4 md:grid-cols-4">
+                  <div className="md:col-span-2">
+                    <label className={label}>
+                      CEP {buscandoCep && <span className="ml-1 text-info">(buscando...)</span>}
+                    </label>
+                    <input
+                      className={input}
+                      placeholder="00000-000"
+                      maxLength={9}
+                      value={form.endereco_cep}
+                      onChange={(event) => handleCepChange(event.target.value)}
+                    />
+                    <p className="mt-1 text-[11px] text-muted">
+                      Ao digitar o CEP, logradouro, bairro, cidade, UF e codigo IBGE sao preenchidos automaticamente.
+                    </p>
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className={label}>Logradouro</label>
+                    <input className={input} value={form.endereco_logradouro} onChange={(event) => setForm((current) => ({ ...current, endereco_logradouro: event.target.value }))} />
+                  </div>
+                  <div>
+                    <label className={label}>Numero</label>
+                    <input className={input} placeholder="123 ou S/N" value={form.endereco_numero} onChange={(event) => setForm((current) => ({ ...current, endereco_numero: event.target.value }))} />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className={label}>Bairro</label>
+                    <input className={input} value={form.endereco_bairro} onChange={(event) => setForm((current) => ({ ...current, endereco_bairro: event.target.value }))} />
+                  </div>
+                  <div>
+                    <label className={label}>UF</label>
+                    <input className={input} maxLength={2} value={form.endereco_uf} onChange={(event) => setForm((current) => ({ ...current, endereco_uf: event.target.value.toUpperCase().slice(0, 2) }))} />
+                  </div>
+                  <div className="md:col-span-3">
+                    <label className={label}>Cidade</label>
+                    <input className={input} value={form.endereco_cidade} onChange={(event) => setForm((current) => ({ ...current, endereco_cidade: event.target.value }))} />
+                  </div>
+                  <div>
+                    <label className={label}>
+                      Cod. IBGE
+                      <span className="ml-1 text-[10px] font-normal text-muted">(automatico)</span>
+                    </label>
+                    <input
+                      className={input + ' bg-light-secondary'}
+                      readOnly
+                      value={form.endereco_codigo_ibge}
+                      title="Preenchido automaticamente pelo CEP"
+                    />
+                  </div>
                 </div>
               </div>
-              <div className="grid gap-4 md:grid-cols-4">
-                <div className="md:col-span-2">
-                  <label className={label}>Cidade</label>
-                  <input className={input} value={form.endereco_cidade} onChange={(event) => setForm((current) => ({ ...current, endereco_cidade: event.target.value }))} />
-                </div>
-                <div>
-                  <label className={label}>UF</label>
-                  <input className={input} maxLength={2} value={form.endereco_uf} onChange={(event) => setForm((current) => ({ ...current, endereco_uf: event.target.value.toUpperCase().slice(0, 2) }))} />
-                </div>
-                <div>
-                  <label className={label}>CEP</label>
-                  <input className={input} value={form.endereco_cep} onChange={(event) => setForm((current) => ({ ...current, endereco_cep: event.target.value }))} />
-                </div>
-                <div className="md:col-span-2">
-                  <label className={label}>Codigo IBGE</label>
-                  <input className={input} value={form.endereco_codigo_ibge} onChange={(event) => setForm((current) => ({ ...current, endereco_codigo_ibge: event.target.value }))} />
-                </div>
-                <label className="mt-6 flex items-center gap-2 text-sm text-muted-dark">
-                  <input type="checkbox" checked={form.ativo} onChange={(event) => setForm((current) => ({ ...current, ativo: event.target.checked }))} />
-                  Ativo
-                </label>
-              </div>
+
+              <label className="flex items-center gap-2 text-sm text-muted-dark">
+                <input type="checkbox" checked={form.ativo} onChange={(event) => setForm((current) => ({ ...current, ativo: event.target.checked }))} />
+                Ativo
+              </label>
             </div>
             <div className="flex justify-end gap-2 border-t border-black/[0.06] bg-light-secondary/40 p-3">
               <button onClick={() => setShowModal(false)} className="rounded-lg border border-black/[0.08] bg-white px-4 py-2 text-sm">Cancelar</button>

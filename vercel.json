@@ -1,26 +1,21 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "framework": "vite",
+  "regions": ["gru1"],
   "installCommand": "npm ci",
   "buildCommand": "npm run build",
-  "outputDirectory": "admin/dist",
+  "outputDirectory": "dist",
   "functions": {
     "api/index.ts": {
-      "maxDuration": 30
+      "maxDuration": 60,
+      "memory": 1024
     }
   },
   "rewrites": [
-    {
-      "source": "/api",
-      "destination": "/api/index"
-    },
-    {
-      "source": "/api/(.*)",
-      "destination": "/api/index"
-    },
-    {
-      "source": "/(.*)",
-      "destination": "/index.html"
-    }
+    { "source": "/api", "destination": "/api/index" },
+    { "source": "/api/(.*)", "destination": "/api/index" },
+    { "source": "/admin/(.*)", "destination": "/api/index" },
+    { "source": "/v1/(.*)", "destination": "/api/index" },
+    { "source": "/webhooks/(.*)", "destination": "/api/index" },
+    { "source": "/((?!assets/|favicon\\.ico|robots\\.txt).*)", "destination": "/index.html" }
   ]
 }

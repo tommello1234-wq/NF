@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Download, ReceiptText } from 'lucide-react'
 import { toast } from 'sonner'
 import { apiGet, apiPostDownload } from '../lib/api'
+import { useEmpresaAtual } from '../lib/empresaContext'
 
 interface Empresa {
   id: string
@@ -40,8 +41,8 @@ function downloadBlob(blob: Blob, filename: string) {
 }
 
 export default function Darfs() {
-  const [empresas, setEmpresas] = useState<Empresa[]>([])
-  const [loading, setLoading] = useState(true)
+  const { empresaId } = useEmpresaAtual()
+  const [empresaDetalhe, setEmpresaDetalhe] = useState<Empresa | null>(null)
   const [generating, setGenerating] = useState(false)
   const [form, setForm] = useState({
     empresa_id: '',
@@ -60,38 +61,22 @@ export default function Darfs() {
   ), [form.valor_principal, form.valor_multa, form.valor_juros])
 
   useEffect(() => {
-    loadEmpresas()
-  }, [])
-
-  async function loadEmpresas() {
-    setLoading(true)
-    try {
-      const data = await apiGet<Empresa[]>('/admin/empresas')
-      setEmpresas(data)
-      if (data[0]) {
+    if (!empresaId) {
+      setEmpresaDetalhe(null)
+      setForm((c) => ({ ...c, empresa_id: '', nome_telefone: '' }))
+      return
+    }
+    apiGet<Empresa>(`/admin/empresas/${empresaId}`)
+      .then((emp) => {
+        setEmpresaDetalhe(emp)
         setForm((current) => ({
           ...current,
-          empresa_id: data[0].id,
-          nome_telefone: [data[0].razao_social || data[0].nome, data[0].telefone].filter(Boolean).join(' / '),
+          empresa_id: emp.id,
+          nome_telefone: [emp.razao_social || emp.nome, emp.telefone].filter(Boolean).join(' / '),
         }))
-      }
-    } catch (err) {
-      toast.error('Erro ao carregar empresas', { description: (err as Error).message })
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  function changeEmpresa(empresaId: string) {
-    const empresa = empresas.find((item) => item.id === empresaId)
-    setForm((current) => ({
-      ...current,
-      empresa_id: empresaId,
-      nome_telefone: empresa
-        ? [empresa.razao_social || empresa.nome, empresa.telefone].filter(Boolean).join(' / ')
-        : current.nome_telefone,
-    }))
-  }
+      })
+      .catch((err) => toast.error('Erro ao carregar empresa', { description: (err as Error).message }))
+  }, [empresaId])
 
   async function gerarDarf() {
     if (!form.empresa_id) {
@@ -120,8 +105,7 @@ export default function Darfs() {
         valor_multa: Number(form.valor_multa || 0),
         valor_juros: Number(form.valor_juros || 0),
       })
-      const empresa = empresas.find((item) => item.id === form.empresa_id)
-      downloadBlob(blob, `darf-${onlyDigits(empresa?.cnpj || '')}-${form.codigo_receita}.pdf`)
+      downloadBlob(blob, `darf-${onlyDigits(empresaDetalhe?.cnpj || '')}-${form.codigo_receita}.pdf`)
       toast.success('DARF gerado')
     } catch (err) {
       toast.error('Erro ao gerar DARF', { description: (err as Error).message })
@@ -151,19 +135,12 @@ export default function Darfs() {
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <div className="xl:col-span-2">
             <label className={label}>Empresa</label>
-            <select
+            <input
               className={input}
-              value={form.empresa_id}
-              disabled={loading}
-              onChange={(event) => changeEmpresa(event.target.value)}
-            >
-              <option value="">Selecione</option>
-              {empresas.map((empresa) => (
-                <option key={empresa.id} value={empresa.id}>
-                  {empresa.nome} - {empresa.cnpj}
-                </option>
-              ))}
-            </select>
+              value={empresaDetalhe ? `${empresaDetalhe.nome} - ${empresaDetalhe.cnpj}` : '—'}
+              disabled
+              readOnly
+            />
           </div>
           <div className="xl:col-span-2">
             <label className={label}>Nome/telefone do contribuinte</label>
@@ -257,7 +234,7 @@ export default function Darfs() {
         <div className="mt-4 flex justify-end">
           <button
             onClick={gerarDarf}
-            disabled={generating || loading}
+            disabled={generating || !empresaId}
             className="inline-flex items-center gap-2 rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-white hover:bg-accent-hover disabled:opacity-50"
           >
             <Download size={16} /> {generating ? 'Gerando...' : 'Gerar PDF DARF'}

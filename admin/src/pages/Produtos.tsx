@@ -1,12 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Edit2, Package, Plus, RefreshCw, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { apiDelete, apiGet, apiPatch, apiPost } from '../lib/api'
-
-interface Empresa {
-  id: string
-  nome: string
-}
+import { useEmpresaAtual } from '../lib/empresaContext'
 
 interface Produto {
   id: string
@@ -22,6 +18,24 @@ interface Produto {
   aliquota_icms: string | number | null
   aliquota_pis: string | number | null
   aliquota_cofins: string | number | null
+  gtin: string | null
+  cest: string | null
+  peso_liquido: string | number | null
+  peso_bruto: string | number | null
+  unidade_tributavel: string | null
+  ex_tipi: string | null
+  aliquota_ipi: string | number | null
+  cst_pis: string | null
+  cst_cofins: string | null
+  cst_ipi: string | null
+  info_adicional_produto: string | null
+  estoque: string | number | null
+  codigo_lc116: string | null
+  codigo_tributario_municipal: string | null
+  codigo_nbs: string | null
+  cnae: string | null
+  aliquota_iss: string | number | null
+  iss_retido: boolean
   tipo: 'produto' | 'servico'
   ativo: boolean
 }
@@ -40,6 +54,24 @@ const emptyForm = {
   aliquota_icms: 0,
   aliquota_pis: 0,
   aliquota_cofins: 0,
+  gtin: '',
+  cest: '',
+  peso_liquido: 0,
+  peso_bruto: 0,
+  unidade_tributavel: '',
+  ex_tipi: '',
+  aliquota_ipi: 0,
+  cst_pis: '',
+  cst_cofins: '',
+  cst_ipi: '',
+  info_adicional_produto: '',
+  estoque: 0,
+  codigo_lc116: '',
+  codigo_tributario_municipal: '',
+  codigo_nbs: '',
+  cnae: '',
+  aliquota_iss: 0,
+  iss_retido: false,
   tipo: 'produto' as 'produto' | 'servico',
   ativo: true,
 }
@@ -49,36 +81,20 @@ function money(value: unknown) {
 }
 
 export default function Produtos() {
-  const [empresas, setEmpresas] = useState<Empresa[]>([])
+  const { empresaId, empresaAtual } = useEmpresaAtual()
   const [produtos, setProdutos] = useState<Produto[]>([])
-  const [empresaId, setEmpresaId] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [showModal, setShowModal] = useState(false)
   const [form, setForm] = useState(emptyForm)
 
-  const empresaAtual = useMemo(() => empresas.find((empresa) => empresa.id === empresaId), [empresas, empresaId])
-
-  useEffect(() => {
-    loadInitial()
-  }, [])
-
   useEffect(() => {
     if (empresaId) loadProdutos(empresaId)
-  }, [empresaId])
-
-  async function loadInitial() {
-    setLoading(true)
-    try {
-      const empresasData = await apiGet<Empresa[]>('/admin/empresas')
-      setEmpresas(empresasData)
-      setEmpresaId(empresasData[0]?.id || '')
-      if (!empresasData[0]) setProdutos([])
-    } catch (err) {
-      toast.error('Erro ao carregar empresas', { description: (err as Error).message })
+    else {
+      setProdutos([])
       setLoading(false)
     }
-  }
+  }, [empresaId])
 
   async function loadProdutos(id = empresaId) {
     if (!id) return
@@ -112,6 +128,24 @@ export default function Produtos() {
       aliquota_icms: Number(produto.aliquota_icms || 0),
       aliquota_pis: Number(produto.aliquota_pis || 0),
       aliquota_cofins: Number(produto.aliquota_cofins || 0),
+      gtin: produto.gtin || '',
+      cest: produto.cest || '',
+      peso_liquido: Number(produto.peso_liquido || 0),
+      peso_bruto: Number(produto.peso_bruto || 0),
+      unidade_tributavel: produto.unidade_tributavel || '',
+      ex_tipi: produto.ex_tipi || '',
+      aliquota_ipi: Number(produto.aliquota_ipi || 0),
+      cst_pis: produto.cst_pis || '',
+      cst_cofins: produto.cst_cofins || '',
+      cst_ipi: produto.cst_ipi || '',
+      info_adicional_produto: produto.info_adicional_produto || '',
+      estoque: Number(produto.estoque || 0),
+      codigo_lc116: produto.codigo_lc116 || '',
+      codigo_tributario_municipal: produto.codigo_tributario_municipal || '',
+      codigo_nbs: produto.codigo_nbs || '',
+      cnae: produto.cnae || '',
+      aliquota_iss: Number(produto.aliquota_iss || 0),
+      iss_retido: Boolean(produto.iss_retido),
       tipo: produto.tipo || 'produto',
       ativo: produto.ativo,
     })
@@ -131,6 +165,11 @@ export default function Produtos() {
       aliquota_icms: Number(form.aliquota_icms || 0),
       aliquota_pis: Number(form.aliquota_pis || 0),
       aliquota_cofins: Number(form.aliquota_cofins || 0),
+      aliquota_ipi: Number(form.aliquota_ipi || 0),
+      aliquota_iss: Number(form.aliquota_iss || 0),
+      peso_liquido: Number(form.peso_liquido || 0),
+      peso_bruto: Number(form.peso_bruto || 0),
+      estoque: Number(form.estoque || 0),
     }
 
     setSaving(true)
@@ -174,11 +213,6 @@ export default function Produtos() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <select className={input} value={empresaId} onChange={(event) => setEmpresaId(event.target.value)}>
-            {empresas.map((empresa) => (
-              <option key={empresa.id} value={empresa.id}>{empresa.nome}</option>
-            ))}
-          </select>
           <button onClick={() => loadProdutos()} className="inline-flex items-center gap-2 rounded-lg border border-black/[0.08] bg-white px-4 py-2 text-sm hover:bg-light-secondary">
             <RefreshCw size={14} /> Atualizar
           </button>
@@ -247,9 +281,7 @@ export default function Produtos() {
               <div className="grid gap-4 md:grid-cols-2">
                 <div>
                   <label className={label}>Empresa</label>
-                  <select className={input} value={form.empresa_id} onChange={(event) => setForm((current) => ({ ...current, empresa_id: event.target.value }))}>
-                    {empresas.map((empresa) => <option key={empresa.id} value={empresa.id}>{empresa.nome}</option>)}
-                  </select>
+                  <input className={input} value={empresaAtual?.nome || empresaAtual?.razao_social || '—'} disabled readOnly />
                 </div>
                 <div>
                   <label className={label}>Tipo</label>
@@ -273,44 +305,145 @@ export default function Produtos() {
               </div>
               <div className="grid gap-4 md:grid-cols-4">
                 <div>
-                  <label className={label}>NCM</label>
-                  <input className={input} value={form.ncm} onChange={(event) => setForm((current) => ({ ...current, ncm: event.target.value }))} />
-                </div>
-                <div>
-                  <label className={label}>CFOP</label>
-                  <input className={input} value={form.cfop} onChange={(event) => setForm((current) => ({ ...current, cfop: event.target.value }))} />
-                </div>
-                <div>
                   <label className={label}>Unidade</label>
                   <input className={input} value={form.unidade} onChange={(event) => setForm((current) => ({ ...current, unidade: event.target.value.toUpperCase() }))} />
                 </div>
-                <div>
-                  <label className={label}>Origem</label>
-                  <input className={input} type="number" min="0" max="8" value={form.origem} onChange={(event) => setForm((current) => ({ ...current, origem: Number(event.target.value) }))} />
-                </div>
-              </div>
-              <div className="grid gap-4 md:grid-cols-4">
-                <div>
-                  <label className={label}>CST/CSOSN</label>
-                  <input className={input} value={form.cst_csosn} onChange={(event) => setForm((current) => ({ ...current, cst_csosn: event.target.value }))} />
-                </div>
-                <div>
-                  <label className={label}>ICMS %</label>
-                  <input className={input} type="number" min="0" max="100" step="0.01" value={form.aliquota_icms} onChange={(event) => setForm((current) => ({ ...current, aliquota_icms: Number(event.target.value) }))} />
-                </div>
-                <div>
-                  <label className={label}>PIS %</label>
-                  <input className={input} type="number" min="0" max="100" step="0.01" value={form.aliquota_pis} onChange={(event) => setForm((current) => ({ ...current, aliquota_pis: Number(event.target.value) }))} />
-                </div>
-                <div>
-                  <label className={label}>COFINS %</label>
-                  <input className={input} type="number" min="0" max="100" step="0.01" value={form.aliquota_cofins} onChange={(event) => setForm((current) => ({ ...current, aliquota_cofins: Number(event.target.value) }))} />
-                </div>
-                <label className="flex items-center gap-2 text-sm text-muted-dark">
+                <label className="flex items-end gap-2 pb-2 text-sm text-muted-dark">
                   <input type="checkbox" checked={form.ativo} onChange={(event) => setForm((current) => ({ ...current, ativo: event.target.checked }))} />
                   Ativo
                 </label>
               </div>
+
+              {form.tipo === 'produto' ? (
+                <>
+                  <div className="border-t border-black/[0.06] pt-4">
+                    <h4 className="mb-3 text-xs font-semibold uppercase text-muted">Dados de mercadoria (NF-e / NFC-e)</h4>
+                    <div className="grid gap-4 md:grid-cols-4">
+                      <div>
+                        <label className={label}>NCM</label>
+                        <input className={input} value={form.ncm} onChange={(event) => setForm((current) => ({ ...current, ncm: event.target.value }))} />
+                      </div>
+                      <div>
+                        <label className={label}>CFOP</label>
+                        <input className={input} value={form.cfop} onChange={(event) => setForm((current) => ({ ...current, cfop: event.target.value }))} />
+                      </div>
+                      <div>
+                        <label className={label}>Origem</label>
+                        <input className={input} type="number" min="0" max="8" value={form.origem} onChange={(event) => setForm((current) => ({ ...current, origem: Number(event.target.value) }))} />
+                      </div>
+                      <div>
+                        <label className={label}>CST/CSOSN</label>
+                        <input className={input} value={form.cst_csosn} onChange={(event) => setForm((current) => ({ ...current, cst_csosn: event.target.value }))} />
+                      </div>
+                    </div>
+                    <div className="mt-4 grid gap-4 md:grid-cols-3">
+                      <div>
+                        <label className={label}>ICMS %</label>
+                        <input className={input} type="number" min="0" max="100" step="0.01" value={form.aliquota_icms} onChange={(event) => setForm((current) => ({ ...current, aliquota_icms: Number(event.target.value) }))} />
+                      </div>
+                      <div>
+                        <label className={label}>PIS %</label>
+                        <input className={input} type="number" min="0" max="100" step="0.01" value={form.aliquota_pis} onChange={(event) => setForm((current) => ({ ...current, aliquota_pis: Number(event.target.value) }))} />
+                      </div>
+                      <div>
+                        <label className={label}>COFINS %</label>
+                        <input className={input} type="number" min="0" max="100" step="0.01" value={form.aliquota_cofins} onChange={(event) => setForm((current) => ({ ...current, aliquota_cofins: Number(event.target.value) }))} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-black/[0.06] pt-4">
+                    <h4 className="mb-3 text-xs font-semibold uppercase text-muted">Identificação e estoque</h4>
+                    <div className="grid gap-4 md:grid-cols-4">
+                      <div>
+                        <label className={label}>GTIN / EAN</label>
+                        <input className={input} placeholder="código de barras ou SEM GTIN" value={form.gtin} onChange={(event) => setForm((current) => ({ ...current, gtin: event.target.value.toUpperCase() }))} />
+                      </div>
+                      <div>
+                        <label className={label}>CEST</label>
+                        <input className={input} placeholder="0000000" value={form.cest} onChange={(event) => setForm((current) => ({ ...current, cest: event.target.value }))} />
+                      </div>
+                      <div>
+                        <label className={label}>Estoque atual</label>
+                        <input className={input} type="number" min="0" step="0.0001" value={form.estoque} onChange={(event) => setForm((current) => ({ ...current, estoque: Number(event.target.value) }))} />
+                      </div>
+                      <div>
+                        <label className={label}>Unidade tributável</label>
+                        <input className={input} placeholder="opcional, default = unidade" value={form.unidade_tributavel} onChange={(event) => setForm((current) => ({ ...current, unidade_tributavel: event.target.value.toUpperCase() }))} />
+                      </div>
+                      <div>
+                        <label className={label}>Peso líquido (kg)</label>
+                        <input className={input} type="number" min="0" step="0.001" value={form.peso_liquido} onChange={(event) => setForm((current) => ({ ...current, peso_liquido: Number(event.target.value) }))} />
+                      </div>
+                      <div>
+                        <label className={label}>Peso bruto (kg)</label>
+                        <input className={input} type="number" min="0" step="0.001" value={form.peso_bruto} onChange={(event) => setForm((current) => ({ ...current, peso_bruto: Number(event.target.value) }))} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-black/[0.06] pt-4">
+                    <h4 className="mb-3 text-xs font-semibold uppercase text-muted">PIS / COFINS / IPI (CST)</h4>
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <div>
+                        <label className={label}>CST PIS</label>
+                        <input className={input} placeholder="ex: 49 (não tributada)" value={form.cst_pis} onChange={(event) => setForm((current) => ({ ...current, cst_pis: event.target.value }))} />
+                      </div>
+                      <div>
+                        <label className={label}>CST COFINS</label>
+                        <input className={input} placeholder="ex: 49 (não tributada)" value={form.cst_cofins} onChange={(event) => setForm((current) => ({ ...current, cst_cofins: event.target.value }))} />
+                      </div>
+                      <div>
+                        <label className={label}>CST IPI</label>
+                        <input className={input} placeholder="opcional" value={form.cst_ipi} onChange={(event) => setForm((current) => ({ ...current, cst_ipi: event.target.value }))} />
+                      </div>
+                      <div>
+                        <label className={label}>IPI %</label>
+                        <input className={input} type="number" min="0" max="100" step="0.01" value={form.aliquota_ipi} onChange={(event) => setForm((current) => ({ ...current, aliquota_ipi: Number(event.target.value) }))} />
+                      </div>
+                      <div>
+                        <label className={label}>Ex. TIPI</label>
+                        <input className={input} placeholder="opcional" value={form.ex_tipi} onChange={(event) => setForm((current) => ({ ...current, ex_tipi: event.target.value }))} />
+                      </div>
+                    </div>
+                    <div className="mt-3">
+                      <label className={label}>Informação adicional do produto</label>
+                      <input className={input} placeholder="vai pra <infAdProd> em todo item desse produto" value={form.info_adicional_produto} onChange={(event) => setForm((current) => ({ ...current, info_adicional_produto: event.target.value }))} />
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="border-t border-black/[0.06] pt-4">
+                  <h4 className="mb-3 text-xs font-semibold uppercase text-muted">Dados de servico (NFS-e Padrao Nacional)</h4>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label className={label}>Item LC 116 / Codigo de tributacao nacional</label>
+                      <input className={input} placeholder="ex: 1.05" value={form.codigo_lc116} onChange={(event) => setForm((current) => ({ ...current, codigo_lc116: event.target.value }))} />
+                    </div>
+                    <div>
+                      <label className={label}>Codigo tributario municipal</label>
+                      <input className={input} placeholder="codigo da prefeitura" value={form.codigo_tributario_municipal} onChange={(event) => setForm((current) => ({ ...current, codigo_tributario_municipal: event.target.value }))} />
+                    </div>
+                    <div>
+                      <label className={label}>Codigo NBS (opcional)</label>
+                      <input className={input} value={form.codigo_nbs} onChange={(event) => setForm((current) => ({ ...current, codigo_nbs: event.target.value }))} />
+                    </div>
+                    <div>
+                      <label className={label}>CNAE (opcional)</label>
+                      <input className={input} value={form.cnae} onChange={(event) => setForm((current) => ({ ...current, cnae: event.target.value }))} />
+                    </div>
+                    <div>
+                      <label className={label}>Aliquota ISS %</label>
+                      <input className={input} type="number" min="0" max="100" step="0.01" value={form.aliquota_iss} onChange={(event) => setForm((current) => ({ ...current, aliquota_iss: Number(event.target.value) }))} />
+                      <p className="mt-1 text-[11px] text-muted">ME no Simples Nacional geralmente recolhe ISS via DAS — confirme com seu contador antes de emitir em producao.</p>
+                    </div>
+                    <label className="flex items-end gap-2 pb-2 text-sm text-muted-dark">
+                      <input type="checkbox" checked={form.iss_retido} onChange={(event) => setForm((current) => ({ ...current, iss_retido: event.target.checked }))} />
+                      ISS retido pelo tomador
+                    </label>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="flex justify-end gap-2 border-t border-black/[0.06] bg-light-secondary/40 p-3">
               <button onClick={() => setShowModal(false)} className="rounded-lg border border-black/[0.08] bg-white px-4 py-2 text-sm">Cancelar</button>
