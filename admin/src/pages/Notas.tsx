@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Download, FileText, Plus, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { apiDownload, apiGet, apiPost } from '../lib/api'
+import { useEmpresaAtual } from '../lib/empresaContext'
 
 interface Empresa {
   id: string
@@ -87,7 +88,8 @@ function downloadBlob(blob: Blob, filename: string) {
 }
 
 export default function Notas() {
-  const [empresas, setEmpresas] = useState<Empresa[]>([])
+  const { empresaId } = useEmpresaAtual()
+  const [empresaDetalhe, setEmpresaDetalhe] = useState<Empresa | null>(null)
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [produtos, setProdutos] = useState<Produto[]>([])
   const [naturezas, setNaturezas] = useState<NaturezaOperacao[]>([])
@@ -111,28 +113,41 @@ export default function Notas() {
   })
 
   useEffect(() => {
-    loadInitial()
+    loadNotas()
   }, [])
 
-  async function loadInitial() {
-    try {
-      const empresasData = await apiGet<Empresa[]>('/admin/empresas')
-      setEmpresas(empresasData)
-      if (empresasData[0]) {
-        setForm((current) => ({ ...current, empresa_id: empresasData[0].id, serie: empresasData[0].serie_nfe || 1 }))
-        await loadCadastros(empresasData[0].id)
-      }
-      await loadNotas()
-    } catch (err) {
-      toast.error('Erro ao carregar notas', { description: (err as Error).message })
+  useEffect(() => {
+    if (!empresaId) {
+      setEmpresaDetalhe(null)
+      setClientes([])
+      setProdutos([])
+      setNaturezas([])
+      setForm((c) => ({ ...c, empresa_id: '', natureza_operacao_id: '', cliente_id: '', produto_id: '' }))
+      return
     }
-  }
+    apiGet<Empresa>(`/admin/empresas/${empresaId}`)
+      .then((emp) => {
+        setEmpresaDetalhe(emp)
+        setForm((c) => ({
+          ...c,
+          empresa_id: empresaId,
+          serie: c.tipo === 'nfce' ? emp.serie_nfce || 1 : emp.serie_nfe || 1,
+        }))
+      })
+      .catch(() => setEmpresaDetalhe(null))
+    loadCadastros(empresaId)
+  }, [empresaId])
 
-  async function loadCadastros(empresaId: string) {
+  const notasFiltradas = useMemo(
+    () => (empresaId ? notas.filter((n) => n.empresa_id === empresaId) : notas),
+    [notas, empresaId],
+  )
+
+  async function loadCadastros(eid: string) {
     const [clientesData, produtosData, naturezasData] = await Promise.all([
-      apiGet<Cliente[]>(`/admin/clientes?empresa_id=${empresaId}&ativo=true`).catch(() => []),
-      apiGet<Produto[]>(`/admin/produtos?empresa_id=${empresaId}&ativo=true`).catch(() => []),
-      apiGet<NaturezaOperacao[]>(`/admin/naturezas-operacao?empresa_id=${empresaId}&ativo=true`).catch(() => []),
+      apiGet<Cliente[]>(`/admin/clientes?empresa_id=${eid}&ativo=true`).catch(() => []),
+      apiGet<Produto[]>(`/admin/produtos?empresa_id=${eid}&ativo=true`).catch(() => []),
+      apiGet<NaturezaOperacao[]>(`/admin/naturezas-operacao?empresa_id=${eid}&ativo=true`).catch(() => []),
     ])
     setClientes(clientesData)
     setProdutos(produtosData)
@@ -143,21 +158,8 @@ export default function Notas() {
     }))
   }
 
-  async function changeEmpresa(empresaId: string) {
-    const empresa = empresas.find((item) => item.id === empresaId)
-    setForm((current) => ({
-      ...current,
-      empresa_id: empresaId,
-      natureza_operacao_id: '',
-      cliente_id: '',
-      produto_id: '',
-      serie: current.tipo === 'nfce' ? empresa?.serie_nfce || 1 : empresa?.serie_nfe || 1,
-    }))
-    if (empresaId) await loadCadastros(empresaId)
-  }
-
   function changeTipo(tipo: string) {
-    const empresa = empresas.find((item) => item.id === form.empresa_id)
+    const empresa = empresaDetalhe
     setForm((current) => ({
       ...current,
       tipo,
@@ -316,18 +318,12 @@ export default function Notas() {
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <div className="xl:col-span-2">
             <label className={label}>Empresa emitente</label>
-            <select
+            <input
               className={input}
-              value={form.empresa_id}
-              onChange={(event) => changeEmpresa(event.target.value)}
-            >
-              <option value="">Selecione</option>
-              {empresas.map((empresa) => (
-                <option key={empresa.id} value={empresa.id}>
-                  {empresa.nome} - {empresa.cnpj}
-                </option>
-              ))}
-            </select>
+              value={empresaDetalhe ? `${empresaDetalhe.nome} - ${empresaDetalhe.cnpj}` : '—'}
+              disabled
+              readOnly
+            />
           </div>
           <div>
             <label className={label}>Tipo</label>
@@ -491,9 +487,9 @@ export default function Notas() {
           <tbody>
             {loading ? (
               <tr><td colSpan={7} className="px-4 py-8 text-center text-muted">Carregando...</td></tr>
-            ) : notas.length === 0 ? (
+            ) : notasFiltradas.length === 0 ? (
               <tr><td colSpan={7} className="px-4 py-12 text-center text-muted">Nenhuma nota gerada.</td></tr>
-            ) : notas.map((nota) => (
+            ) : notasFiltradas.map((nota) => (
               <tr key={nota.id} className="border-b border-black/[0.04] hover:bg-light-secondary">
                 <td className="px-4 py-3">
                   <div className="font-semibold text-dark">{nota.numero || '-'}</div>

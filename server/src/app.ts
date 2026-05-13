@@ -12,6 +12,9 @@ import { adminProdutosRoutes } from './routes/adminProdutos.js'
 import { adminDarfsRoutes } from './routes/adminDarfs.js'
 import { adminFiscalRoutes } from './routes/adminFiscal.js'
 import { adminNfseRoutes } from './routes/adminNfse.js'
+import { adminNfeRoutes } from './routes/adminNfe.js'
+import { adminVendasRoutes } from './routes/adminVendas.js'
+import { adminAuditLogRoutes } from './routes/adminAuditLog.js'
 import { adminTictoRoutes } from './routes/adminTicto.js'
 import { webhooksTictoRoutes } from './routes/webhooksTicto.js'
 
@@ -29,6 +32,10 @@ export async function buildApp() {
   await app.register(cors, {
     origin: true,
     credentials: true,
+    // Default do @fastify/cors é só GET/HEAD/POST. Precisamos liberar
+    // PUT/PATCH/DELETE pra rotas REST funcionarem no browser (preflight OPTIONS).
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Authorization', 'Content-Type', 'Accept', 'X-Requested-With'],
   })
 
   await app.register(multipart, {
@@ -49,6 +56,9 @@ export async function buildApp() {
   await app.register(adminDarfsRoutes, { prefix: '/admin' })
   await app.register(adminFiscalRoutes, { prefix: '/admin' })
   await app.register(adminNfseRoutes, { prefix: '/admin' })
+  await app.register(adminNfeRoutes, { prefix: '/admin' })
+  await app.register(adminVendasRoutes, { prefix: '/admin' })
+  await app.register(adminAuditLogRoutes, { prefix: '/admin' })
   await app.register(adminTictoRoutes, { prefix: '/admin' })
 
   // Webhooks públicos (sem authAdmin — autenticação via token cadastrado por empresa)
