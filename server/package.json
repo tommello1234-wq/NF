@@ -11,6 +11,7 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "db:migrate": "tsx scripts/apply-migrations.ts",
+    "db:fiscal-padrao": "tsx scripts/aplicar-fiscal-padrao.ts",
     "spike:nfse": "tsx scripts/spike-nfse.ts",
     "preview:danfe": "tsx scripts/preview-danfe.ts",
     "seed:teste": "tsx scripts/seed-teste.ts",

@@ -403,7 +403,9 @@ async function carregarItens(itens: NfeInput['itens']): Promise<ItemXml[]> {
       valorTotal: +(valorUnit * quantidade - desconto).toFixed(2),
       gtin: p.gtin || 'SEM GTIN',
       origem: p.origem ?? 0,
-      cstCsosn: p.cst_csosn || '102',
+      // Pra Regime Normal (CRT=3), usa cst_icms (2 dígitos: 00, 10, 20...).
+      // Pra Simples (CRT=1/4), usa cst_csosn ou csosn (3 dígitos: 102, 500...).
+      cstCsosn: p.cst_icms || p.cst_csosn || p.csosn || '102',
       cstPis: p.cst_pis || '49',
       cstCofins: p.cst_cofins || '49',
       cstIpi: p.cst_ipi || undefined,
@@ -522,6 +524,18 @@ function calcularTotais(itens: ItemXml[], _input: NfeInput) {
     if (['40', '41', '50', '60'].includes(cst)) return s
     return s + i.valorTotal
   }, 0)
+  // PIS / COFINS: soma só dos itens com CST tributável (PISAliq, COFINSAliq).
+  // Pra CST 04, 06-09, 49 (NT/Outras), o item não soma.
+  const cstsTributados = ['01', '02']
+  const valorPisTotal = itens.reduce((s, i) => {
+    if (!cstsTributados.includes(i.cstPis) || !i.aliquotaPis) return s
+    return s + (i.valorTotal * (i.aliquotaPis / 100))
+  }, 0)
+  const valorCofinsTotal = itens.reduce((s, i) => {
+    if (!cstsTributados.includes(i.cstCofins) || !i.aliquotaCofins) return s
+    return s + (i.valorTotal * (i.aliquotaCofins / 100))
+  }, 0)
+
   return {
     valorProdutos,
     valorDesconto,
@@ -532,8 +546,8 @@ function calcularTotais(itens: ItemXml[], _input: NfeInput) {
     valorBaseIcms: +valorBaseIcms.toFixed(2),
     valorIcmsSt: 0,
     valorIpi: +valorIpi.toFixed(2),
-    valorPis: 0,
-    valorCofins: 0,
+    valorPis: +valorPisTotal.toFixed(2),
+    valorCofins: +valorCofinsTotal.toFixed(2),
     valorTotalNota: +(valorProdutos - valorDesconto + valorIpi).toFixed(2),
   }
 }

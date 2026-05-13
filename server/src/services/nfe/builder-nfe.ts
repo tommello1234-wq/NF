@@ -412,17 +412,26 @@ function montarImposto(item: ItemXml, interestadual: boolean, crt: 1 | 2 | 3 | 4
     }
   }
 
+  // Ordem dos sub-elementos é definida pelo XSD da NF-e 4.0:
+  //   ICMS → IPI → PIS → COFINS → ICMSUFDest
+  // Construímos o objeto na ordem correta de inserção (ECMAScript preserva ordem).
   const imposto: Record<string, unknown> = {
     ICMS: icms,
-    PIS: { [grupoPis(item.cstPis)]: pisPayload(item) },
-    COFINS: { [grupoCofins(item.cstCofins)]: cofinsPayload(item) },
   }
 
   if (item.cstIpi) {
-    // CST IPI tributados: 00, 49, 50, 99 → IPITrib  | Não tributados: 01-05, 51-55 → IPINT
-    const tributados = ['00', '49', '50', '99']
+    // CST IPI:
+    //   00, 50          → SEMPRE IPITrib (tributados na entrada/saída)
+    //   01-05, 51-55    → SEMPRE IPINT (não-tributado / suspenso / imune / isento)
+    //   49 (outras ent.), 99 (outras saí.) → IPITrib SE houver alíquota > 0;
+    //                                        senão IPINT (caso típico de revenda)
+    const semprePotIpi = ['00', '50']
     const cEnq = item.codigoEnquadramentoIpi || item.exTipi || '999'
-    if (tributados.includes(item.cstIpi)) {
+    const temAliq = (item.aliquotaIpi || 0) > 0 || (item.valorUnitarioIpi || 0) > 0
+    const vaiTributado =
+      semprePotIpi.includes(item.cstIpi) ||
+      ((item.cstIpi === '49' || item.cstIpi === '99') && temAliq)
+    if (vaiTributado) {
       if (item.tipoCalculoIpi === 'valor') {
         const qUnid = item.qtdeTotalIpi ?? item.quantidadeComercial
         const vUnid = item.valorUnitarioIpi ?? 0
@@ -455,6 +464,10 @@ function montarImposto(item: ItemXml, interestadual: boolean, crt: 1 | 2 | 3 | 4
       }
     }
   }
+
+  // PIS e COFINS depois de IPI (ordem do XSD)
+  imposto.PIS = { [grupoPis(item.cstPis)]: pisPayload(item) }
+  imposto.COFINS = { [grupoCofins(item.cstCofins)]: cofinsPayload(item) }
 
   if (interestadual && item.aliquotaIcms != null) {
     imposto.ICMSUFDest = {
