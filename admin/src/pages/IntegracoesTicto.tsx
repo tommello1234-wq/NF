@@ -2,12 +2,7 @@ import { useEffect, useState } from 'react'
 import { Check, Copy, Edit2, Plug, Plus, RefreshCw, Save, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { apiDelete, apiGet, apiPatch, apiPost } from '../lib/api'
-
-interface Empresa {
-  id: string
-  nome: string
-  cnpj: string
-}
+import { useEmpresaAtual } from '../lib/empresaContext'
 
 interface Servico {
   id: string
@@ -63,8 +58,7 @@ function money(value: unknown) {
 }
 
 export default function IntegracoesTicto() {
-  const [empresas, setEmpresas] = useState<Empresa[]>([])
-  const [empresaId, setEmpresaId] = useState('')
+  const { empresaId } = useEmpresaAtual()
   const [config, setConfig] = useState<TictoConfig | null>(null)
   const [tokenInput, setTokenInput] = useState('')
   const [savingToken, setSavingToken] = useState(false)
@@ -86,22 +80,14 @@ export default function IntegracoesTicto() {
   const webhookUrl = config ? `${PUBLIC_BASE}${config.webhook_path}` : ''
 
   useEffect(() => {
-    loadInitial()
-  }, [])
-
-  useEffect(() => {
     if (empresaId) loadAll(empresaId)
-  }, [empresaId])
-
-  async function loadInitial() {
-    try {
-      const data = await apiGet<Empresa[]>('/admin/empresas')
-      setEmpresas(data)
-      if (data[0]) setEmpresaId(data[0].id)
-    } catch (err) {
-      toast.error('Erro ao carregar empresas', { description: (err as Error).message })
+    else {
+      setConfig(null)
+      setServicos([])
+      setMapeamentos([])
+      setEventos([])
     }
-  }
+  }, [empresaId])
 
   async function loadAll(id: string) {
     try {
@@ -225,14 +211,10 @@ export default function IntegracoesTicto() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <select className={input} value={empresaId} onChange={(ev) => setEmpresaId(ev.target.value)}>
-            {empresas.map((e) => (
-              <option key={e.id} value={e.id}>{e.nome}</option>
-            ))}
-          </select>
           <button
             onClick={() => empresaId && loadAll(empresaId)}
-            className="inline-flex items-center gap-2 rounded-lg border border-black/[0.08] bg-white px-4 py-2 text-sm hover:bg-light-secondary"
+            disabled={!empresaId}
+            className="inline-flex items-center gap-2 rounded-lg border border-black/[0.08] bg-white px-4 py-2 text-sm hover:bg-light-secondary disabled:opacity-50"
           >
             <RefreshCw size={14} /> Atualizar
           </button>

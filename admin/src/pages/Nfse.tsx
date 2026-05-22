@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Ban, CheckCircle, Download, FileSignature, Plus, RefreshCw, X, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { apiDownload, apiGet, apiPost } from '../lib/api'
+import { useEmpresaAtual } from '../lib/empresaContext'
 
 interface Empresa {
   id: string
@@ -83,7 +84,8 @@ function downloadBlob(blob: Blob, filename: string) {
 }
 
 export default function Nfse() {
-  const [empresas, setEmpresas] = useState<Empresa[]>([])
+  const { empresaId } = useEmpresaAtual()
+  const [empresaDetalhe, setEmpresaDetalhe] = useState<Empresa | null>(null)
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [servicos, setServicos] = useState<ServicoCadastrado[]>([])
   const [notas, setNotas] = useState<Nfse[]>([])
@@ -107,27 +109,28 @@ export default function Nfse() {
   })
 
   useEffect(() => {
-    loadInitial()
+    loadNotas()
   }, [])
 
-  async function loadInitial() {
-    try {
-      const empresasData = await apiGet<Empresa[]>('/admin/empresas')
-      setEmpresas(empresasData)
-      if (empresasData[0]) {
-        setForm((f) => ({ ...f, empresa_id: empresasData[0].id }))
-        await loadCadastros(empresasData[0].id)
-      }
-      await loadNotas()
-    } catch (err) {
-      toast.error('Erro ao carregar', { description: (err as Error).message })
+  useEffect(() => {
+    if (!empresaId) {
+      setEmpresaDetalhe(null)
+      setClientes([])
+      setServicos([])
+      setForm((f) => ({ ...f, empresa_id: '', produto_id: '', cliente_id: '' }))
+      return
     }
-  }
+    setForm((f) => ({ ...f, empresa_id: empresaId, produto_id: '', cliente_id: '' }))
+    loadCadastros(empresaId)
+    apiGet<Empresa>(`/admin/empresas/${empresaId}`)
+      .then(setEmpresaDetalhe)
+      .catch(() => setEmpresaDetalhe(null))
+  }, [empresaId])
 
-  async function loadCadastros(empresaId: string) {
+  async function loadCadastros(eid: string) {
     const [clientesData, servicosData] = await Promise.all([
-      apiGet<Cliente[]>(`/admin/clientes?empresa_id=${empresaId}&ativo=true`).catch(() => []),
-      apiGet<ServicoCadastrado[]>(`/admin/produtos?empresa_id=${empresaId}&tipo=servico&ativo=true`).catch(() => []),
+      apiGet<Cliente[]>(`/admin/clientes?empresa_id=${eid}&ativo=true`).catch(() => []),
+      apiGet<ServicoCadastrado[]>(`/admin/produtos?empresa_id=${eid}&tipo=servico&ativo=true`).catch(() => []),
     ])
     setClientes(clientesData)
     setServicos(servicosData)
@@ -144,10 +147,10 @@ export default function Nfse() {
     }
   }
 
-  function changeEmpresa(empresaId: string) {
-    setForm((f) => ({ ...f, empresa_id: empresaId, produto_id: '', cliente_id: '' }))
-    if (empresaId) loadCadastros(empresaId)
-  }
+  const notasFiltradas = useMemo(
+    () => (empresaId ? notas.filter((n) => n.empresa_id === empresaId) : notas),
+    [notas, empresaId],
+  )
 
   function changeProduto(produtoId: string) {
     const servico = servicos.find((s) => s.id === produtoId)
@@ -169,7 +172,7 @@ export default function Nfse() {
       return
     }
 
-    const empresa = empresas.find((e) => e.id === form.empresa_id)
+    const empresa = empresaDetalhe
     const ambiente = empresa?.nfse_ambiente === 1 ? 'PRODUÇÃO' : 'HOMOLOGAÇÃO'
 
     if (
@@ -260,7 +263,7 @@ export default function Nfse() {
     }
   }
 
-  const empresaSelecionada = empresas.find((e) => e.id === form.empresa_id)
+  const empresaSelecionada = empresaDetalhe
   const empresaIncompleta = empresaSelecionada && (
     !empresaSelecionada.inscricao_municipal ||
     !(empresaSelecionada.municipio_emissor_codigo || empresaSelecionada.endereco_codigo_ibge)
@@ -323,9 +326,9 @@ export default function Nfse() {
           <tbody>
             {loading ? (
               <tr><td colSpan={7} className="px-4 py-8 text-center text-muted">Carregando…</td></tr>
-            ) : notas.length === 0 ? (
+            ) : notasFiltradas.length === 0 ? (
               <tr><td colSpan={7} className="px-4 py-12 text-center text-muted">Nenhuma NFS-e emitida ainda.</td></tr>
-            ) : notas.map((nota) => (
+            ) : notasFiltradas.map((nota) => (
               <tr key={nota.id} className="border-b border-black/[0.04] hover:bg-light-secondary">
                 <td className="px-4 py-3">
                   <div className="font-semibold text-dark">{nota.numero_nfse || '—'}</div>
@@ -460,18 +463,14 @@ export default function Nfse() {
             <div className="max-h-[72vh] space-y-4 overflow-y-auto p-5">
               <div>
                 <label className={label}>Empresa emitente</label>
-                <select
+                <input
                   className={input}
-                  value={form.empresa_id}
-                  onChange={(ev) => changeEmpresa(ev.target.value)}
-                >
-                  <option value="">Selecione</option>
-                  {empresas.map((e) => (
-                    <option key={e.id} value={e.id}>
-                      {e.nome} — {e.cnpj} ({e.nfse_ambiente === 1 ? 'PRODUÇÃO' : 'HOMOLOGAÇÃO'})
-                    </option>
-                  ))}
-                </select>
+                  value={empresaSelecionada
+                    ? `${empresaSelecionada.nome} — ${empresaSelecionada.cnpj} (${empresaSelecionada.nfse_ambiente === 1 ? 'PRODUÇÃO' : 'HOMOLOGAÇÃO'})`
+                    : '—'}
+                  disabled
+                  readOnly
+                />
                 {empresaIncompleta && (
                   <div className="mt-2 flex items-start gap-2 rounded-lg border border-warning/30 bg-warning-bg p-2 text-xs text-warning">
                     <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
