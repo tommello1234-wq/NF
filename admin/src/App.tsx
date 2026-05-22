@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Routes, Route, Link, Navigate, useNavigate, useLocation } from 'react-router-dom'
-import { Building2, ShieldCheck, FileSignature, FileText, LogOut, Package, Plug, ReceiptText, Settings2, Users } from 'lucide-react'
+import { Building2, ShieldCheck, CreditCard, FileSignature, FileText, LogOut, Package, Plug, ReceiptText, Settings2, Users } from 'lucide-react'
 import { supabase } from './lib/supabase'
 import Login from './pages/Login'
 import Empresas from './pages/Empresas'
@@ -12,6 +12,7 @@ import Produtos from './pages/Produtos'
 import Darfs from './pages/Darfs'
 import Fiscal from './pages/Fiscal'
 import IntegracoesTicto from './pages/IntegracoesTicto'
+import IntegracoesStripe from './pages/IntegracoesStripe'
 
 function Layout({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate()
@@ -34,6 +35,7 @@ function Layout({ children }: { children: React.ReactNode }) {
     { to: '/fiscal', label: 'Fiscal', icon: Settings2 },
     { to: '/nfse', label: 'NFS-e', icon: FileSignature },
     { to: '/integracoes/ticto', label: 'Integração Ticto', icon: Plug },
+    { to: '/integracoes/stripe', label: 'Integração Stripe', icon: CreditCard },
     { to: '/notas', label: 'Notas (legado)', icon: FileText },
     { to: '/darfs', label: 'DARF', icon: ReceiptText },
   ]
@@ -112,6 +114,7 @@ export default function App() {
       <Route path="/notas" element={<RequireAuth><Notas /></RequireAuth>} />
       <Route path="/nfse" element={<RequireAuth><Nfse /></RequireAuth>} />
       <Route path="/integracoes/ticto" element={<RequireAuth><IntegracoesTicto /></RequireAuth>} />
+      <Route path="/integracoes/stripe" element={<RequireAuth><IntegracoesStripe /></RequireAuth>} />
       <Route path="/darfs" element={<RequireAuth><Darfs /></RequireAuth>} />
       <Route path="*" element={<Navigate to="/empresas" replace />} />
     </Routes>

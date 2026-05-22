@@ -14,6 +14,8 @@ import { adminFiscalRoutes } from './routes/adminFiscal.js'
 import { adminNfseRoutes } from './routes/adminNfse.js'
 import { adminTictoRoutes } from './routes/adminTicto.js'
 import { webhooksTictoRoutes } from './routes/webhooksTicto.js'
+import { adminStripeRoutes } from './routes/adminStripe.js'
+import { webhooksStripeRoutes } from './routes/webhooksStripe.js'
 
 export async function buildApp() {
   const app = Fastify({
@@ -50,9 +52,11 @@ export async function buildApp() {
   await app.register(adminFiscalRoutes, { prefix: '/admin' })
   await app.register(adminNfseRoutes, { prefix: '/admin' })
   await app.register(adminTictoRoutes, { prefix: '/admin' })
+  await app.register(adminStripeRoutes, { prefix: '/admin' })
 
-  // Webhooks públicos (sem authAdmin — autenticação via token cadastrado por empresa)
+  // Webhooks públicos (sem authAdmin — autenticação via secret cadastrado por empresa)
   await app.register(webhooksTictoRoutes, { prefix: '/webhooks' })
+  await app.register(webhooksStripeRoutes, { prefix: '/webhooks' })
 
   return app
 }
