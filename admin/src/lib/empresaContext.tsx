@@ -16,6 +16,7 @@ interface EmpresaCtx {
   empresaAtual?: EmpresaResumo
   loading: boolean
   setEmpresaId: (id: string) => void
+  clearEmpresa: () => void
   reload: () => Promise<void>
 }
 
@@ -33,10 +34,14 @@ export function EmpresaProvider({ children }: { children: ReactNode }) {
       const list = await apiGet<EmpresaResumo[]>('/admin/empresas')
       setEmpresas(list)
       const saved = localStorage.getItem(STORAGE_KEY) || ''
+      // Mantém escolha do usuário se ainda for válida. Não auto-seleciona
+      // a primeira empresa — a tela /selecionar-empresa cuida disso pra
+      // forçar uma decisão consciente e isolar workspaces por empresa.
       const valido = saved && list.some((e) => e.id === saved)
-      const escolhido = valido ? saved : list[0]?.id || ''
-      if (escolhido !== saved) localStorage.setItem(STORAGE_KEY, escolhido)
-      setEmpresaIdState(escolhido)
+      if (!valido && saved) {
+        localStorage.removeItem(STORAGE_KEY)
+        setEmpresaIdState('')
+      }
     } finally {
       setLoading(false)
     }
@@ -62,10 +67,15 @@ export function EmpresaProvider({ children }: { children: ReactNode }) {
     localStorage.setItem(STORAGE_KEY, id)
   }, [])
 
+  const clearEmpresa = useCallback(() => {
+    setEmpresaIdState('')
+    localStorage.removeItem(STORAGE_KEY)
+  }, [])
+
   const empresaAtual = empresas.find((e) => e.id === empresaId)
 
   return (
-    <Ctx.Provider value={{ empresas, empresaId, empresaAtual, loading, setEmpresaId, reload }}>
+    <Ctx.Provider value={{ empresas, empresaId, empresaAtual, loading, setEmpresaId, clearEmpresa, reload }}>
       {children}
     </Ctx.Provider>
   )

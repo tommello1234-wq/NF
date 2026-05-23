@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Routes, Route, Link, Navigate, useNavigate, useLocation } from 'react-router-dom'
-import { Building2, ShieldCheck, CreditCard, FileSignature, FileText, LogOut, Package, Plug, ReceiptText, Settings2, ShoppingCart, Users } from 'lucide-react'
+import { Building2, ShieldCheck, CreditCard, FileSignature, FileText, LogOut, Package, Plug, ReceiptText, Repeat, Settings2, ShoppingCart, Users } from 'lucide-react'
 import { supabase } from './lib/supabase'
 import { EmpresaProvider, useEmpresaAtual } from './lib/empresaContext'
 import Login from './pages/Login'
@@ -16,6 +16,7 @@ import Darfs from './pages/Darfs'
 import Fiscal from './pages/Fiscal'
 import IntegracoesTicto from './pages/IntegracoesTicto'
 import IntegracoesStripe from './pages/IntegracoesStripe'
+import SelecionarEmpresa from './pages/SelecionarEmpresa'
 
 function Layout({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate()
@@ -90,34 +91,100 @@ function Layout({ children }: { children: React.ReactNode }) {
   )
 }
 
+/**
+ * Barra de "workspace ativo" — mostra qual empresa está selecionada com
+ * uma cor derivada do nome (mesma lógica da splash `/selecionar-empresa`)
+ * e um botão pra trocar. Não é mais um <select>, pra forçar a passagem
+ * consciente pela splash e evitar troca acidental no meio do trabalho.
+ */
 function EmpresaTopBar() {
+  const navigate = useNavigate()
   const location = useLocation()
-  const { empresas, empresaId, setEmpresaId, loading } = useEmpresaAtual()
-  // Telas que não fazem sentido o filtro global (já mostram tudo ou já têm um detalhe específico).
+  const { empresaAtual, clearEmpresa, loading } = useEmpresaAtual()
+
+  // Tela /empresas é o CRUD global, não faz sentido o filtro de workspace.
   if (location.pathname.startsWith('/empresas')) return null
 
+  if (loading) {
+    return (
+      <div className="sticky top-0 z-30 flex items-center gap-2 border-b border-black/[0.06] bg-white px-6 py-2 text-xs text-muted">
+        <Building2 size={14} /> Carregando empresa...
+      </div>
+    )
+  }
+
+  if (!empresaAtual) return null
+
+  const cor = corDaEmpresa(empresaAtual.nome || empresaAtual.razao_social || empresaAtual.id)
+  const ambiente = empresaAtual.ambiente_sefaz === 1 ? 'PROD' : empresaAtual.ambiente_sefaz === 2 ? 'HOMOL' : null
+
+  function trocar() {
+    clearEmpresa()
+    navigate('/selecionar-empresa')
+  }
+
   return (
-    <div className="sticky top-0 z-30 flex items-center gap-3 border-b border-accent/20 bg-accent/10 px-6 py-2 shadow-sm backdrop-blur">
-      <Building2 size={14} className="text-accent" />
-      <span className="text-xs font-medium text-muted-dark">Empresa selecionada:</span>
-      <select
-        value={empresaId}
-        onChange={(e) => setEmpresaId(e.target.value)}
-        disabled={loading || empresas.length === 0}
-        className="rounded-md border border-accent/30 bg-white px-2 py-1 text-sm font-medium text-dark focus:outline-none focus:ring-2 focus:ring-accent/50"
+    <div
+      className="sticky top-0 z-30 flex items-center gap-3 border-b px-6 py-2 shadow-sm backdrop-blur"
+      style={{ background: cor.bg, borderColor: cor.bar }}
+    >
+      <div
+        className="flex h-7 w-7 items-center justify-center rounded-lg"
+        style={{ background: cor.bar, color: '#fff' }}
       >
-        {empresas.length === 0 && <option value="">— sem empresas cadastradas —</option>}
-        {empresas.map((e) => (
-          <option key={e.id} value={e.id}>
-            {e.nome || e.razao_social}
-          </option>
-        ))}
-      </select>
-      <span className="text-[11px] text-muted-dark/80">
-        compartilhada com todas as outras abas — trocar aqui afeta clientes, produtos, NF-e, etc.
-      </span>
+        <Building2 size={14} />
+      </div>
+      <div className="flex flex-col leading-tight">
+        <span className="text-[10px] uppercase tracking-wide" style={{ color: cor.fg, opacity: 0.7 }}>
+          Empresa ativa
+        </span>
+        <span className="text-sm font-bold" style={{ color: cor.fg }}>
+          {empresaAtual.nome || empresaAtual.razao_social}
+        </span>
+      </div>
+      {ambiente && (
+        <span
+          className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+            empresaAtual.ambiente_sefaz === 1
+              ? 'bg-emerald-600 text-white'
+              : 'bg-amber-500 text-white'
+          }`}
+        >
+          {ambiente}
+        </span>
+      )}
+      <div className="flex-1" />
+      <button
+        onClick={trocar}
+        className="flex items-center gap-1.5 rounded-md border bg-white px-2.5 py-1 text-xs font-medium shadow-sm hover:shadow"
+        style={{ borderColor: cor.bar, color: cor.fg }}
+      >
+        <Repeat size={12} />
+        Trocar empresa
+      </button>
     </div>
   )
+}
+
+/**
+ * Mesma função usada no `SelecionarEmpresa.tsx` — duplicada de propósito
+ * pra não criar uma dependência cruzada só por causa de uma constante de
+ * 6 cores. Se mudar uma, mudar a outra.
+ */
+function corDaEmpresa(seed: string): { bar: string; bg: string; fg: string } {
+  let hash = 5381
+  for (let i = 0; i < seed.length; i++) {
+    hash = ((hash << 5) + hash + seed.charCodeAt(i)) >>> 0
+  }
+  const paletas = [
+    { bar: '#0ea5e9', bg: '#e0f2fe', fg: '#0369a1' },
+    { bar: '#10b981', bg: '#d1fae5', fg: '#047857' },
+    { bar: '#8b5cf6', bg: '#ede9fe', fg: '#6d28d9' },
+    { bar: '#f59e0b', bg: '#fef3c7', fg: '#b45309' },
+    { bar: '#ec4899', bg: '#fce7f3', fg: '#be185d' },
+    { bar: '#06b6d4', bg: '#cffafe', fg: '#0e7490' },
+  ]
+  return paletas[hash % paletas.length]
 }
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -137,30 +204,80 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 
   if (loading) return <div className="flex h-screen items-center justify-center text-muted">Carregando...</div>
   if (!logged) return <Navigate to="/login" replace />
-  return (
-    <EmpresaProvider>
-      <Layout>{children}</Layout>
-    </EmpresaProvider>
-  )
+  return <EmpresaProvider>{children}</EmpresaProvider>
+}
+
+/**
+ * Wrapper que garante uma empresa selecionada antes de renderizar a tela.
+ * Se o `empresaContext` está sem `empresaId` (primeiro login ou após
+ * clicar "Trocar empresa"), manda pra splash `/selecionar-empresa`.
+ *
+ * A página `/empresas` é exceção — é onde o usuário cadastra a primeira
+ * empresa, então não pode exigir empresa selecionada (chicken & egg).
+ */
+function RequireEmpresa({ children }: { children: React.ReactNode }) {
+  const { empresaId, empresas, loading } = useEmpresaAtual()
+  if (loading) {
+    return <div className="flex h-screen items-center justify-center text-muted">Carregando empresa...</div>
+  }
+  // Sem nenhuma empresa cadastrada — manda criar a primeira.
+  if (empresas.length === 0) return <Navigate to="/empresas" replace />
+  // Tem empresas mas nenhuma selecionada — splash.
+  if (!empresaId) return <Navigate to="/selecionar-empresa" replace />
+  return <Layout>{children}</Layout>
+}
+
+/** Igual ao RequireEmpresa mas sem exigir empresa — pra /empresas e /selecionar-empresa. */
+function SemEmpresa({ children, layout = true }: { children: React.ReactNode; layout?: boolean }) {
+  if (layout) return <Layout>{children}</Layout>
+  return <>{children}</>
 }
 
 export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
-      <Route path="/empresas" element={<RequireAuth><Empresas /></RequireAuth>} />
-      <Route path="/empresas/:id" element={<RequireAuth><EmpresaDetalhe /></RequireAuth>} />
-      <Route path="/clientes" element={<RequireAuth><Clientes /></RequireAuth>} />
-      <Route path="/produtos" element={<RequireAuth><Produtos /></RequireAuth>} />
-      <Route path="/vendas" element={<RequireAuth><Vendas /></RequireAuth>} />
-      <Route path="/fiscal" element={<RequireAuth><Fiscal /></RequireAuth>} />
-      <Route path="/notas" element={<RequireAuth><Notas /></RequireAuth>} />
-      <Route path="/nfse" element={<RequireAuth><Nfse /></RequireAuth>} />
-      <Route path="/nfe" element={<RequireAuth><Nfe /></RequireAuth>} />
-      <Route path="/integracoes/ticto" element={<RequireAuth><IntegracoesTicto /></RequireAuth>} />
-      <Route path="/integracoes/stripe" element={<RequireAuth><IntegracoesStripe /></RequireAuth>} />
-      <Route path="/darfs" element={<RequireAuth><Darfs /></RequireAuth>} />
-      <Route path="*" element={<Navigate to="/empresas" replace />} />
+      <Route
+        path="/selecionar-empresa"
+        element={
+          <RequireAuth>
+            <SemEmpresa layout={false}>
+              <SelecionarEmpresa />
+            </SemEmpresa>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/empresas"
+        element={
+          <RequireAuth>
+            <SemEmpresa>
+              <Empresas />
+            </SemEmpresa>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/empresas/:id"
+        element={
+          <RequireAuth>
+            <SemEmpresa>
+              <EmpresaDetalhe />
+            </SemEmpresa>
+          </RequireAuth>
+        }
+      />
+      <Route path="/clientes" element={<RequireAuth><RequireEmpresa><Clientes /></RequireEmpresa></RequireAuth>} />
+      <Route path="/produtos" element={<RequireAuth><RequireEmpresa><Produtos /></RequireEmpresa></RequireAuth>} />
+      <Route path="/vendas" element={<RequireAuth><RequireEmpresa><Vendas /></RequireEmpresa></RequireAuth>} />
+      <Route path="/fiscal" element={<RequireAuth><RequireEmpresa><Fiscal /></RequireEmpresa></RequireAuth>} />
+      <Route path="/notas" element={<RequireAuth><RequireEmpresa><Notas /></RequireEmpresa></RequireAuth>} />
+      <Route path="/nfse" element={<RequireAuth><RequireEmpresa><Nfse /></RequireEmpresa></RequireAuth>} />
+      <Route path="/nfe" element={<RequireAuth><RequireEmpresa><Nfe /></RequireEmpresa></RequireAuth>} />
+      <Route path="/integracoes/ticto" element={<RequireAuth><RequireEmpresa><IntegracoesTicto /></RequireEmpresa></RequireAuth>} />
+      <Route path="/integracoes/stripe" element={<RequireAuth><RequireEmpresa><IntegracoesStripe /></RequireEmpresa></RequireAuth>} />
+      <Route path="/darfs" element={<RequireAuth><RequireEmpresa><Darfs /></RequireEmpresa></RequireAuth>} />
+      <Route path="*" element={<Navigate to="/selecionar-empresa" replace />} />
     </Routes>
   )
 }
