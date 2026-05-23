@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Check, Copy, CreditCard, Edit2, Plus, RefreshCw, Save, Trash2, X } from 'lucide-react'
+import { Check, Copy, CreditCard, Edit2, Plus, RefreshCw, Save, Sparkles, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { apiDelete, apiGet, apiPatch, apiPost } from '../lib/api'
 import { useEmpresaAtual } from '../lib/empresaContext'
@@ -27,6 +27,8 @@ interface StripeConfig {
   empresa_nome: string
   secret_configurado: boolean
   webhook_path: string
+  produto_default_id: string | null
+  produto_default: { id: string; descricao: string; codigo_lc116: string | null; aliquota_iss?: number | null; ativo: boolean } | null
 }
 
 interface WebhookEvent {
@@ -67,6 +69,9 @@ export default function IntegracoesStripe() {
   const [mapeamentos, setMapeamentos] = useState<Mapeamento[]>([])
   const [eventos, setEventos] = useState<WebhookEvent[]>([])
 
+  const [defaultProdutoSelect, setDefaultProdutoSelect] = useState('')
+  const [savingDefault, setSavingDefault] = useState(false)
+
   const [showMapModal, setShowMapModal] = useState(false)
   const [mapForm, setMapForm] = useState<{ id?: string; stripe_price_id: string; produto_id: string; valor_unitario_override: number | string; ativo: boolean }>({
     stripe_price_id: '',
@@ -100,8 +105,27 @@ export default function IntegracoesStripe() {
       setServicos(srvs)
       setMapeamentos(maps)
       setEventos(evts)
+      setDefaultProdutoSelect(cfg.produto_default_id || '')
     } catch (err) {
       toast.error('Erro ao carregar', { description: (err as Error).message })
+    }
+  }
+
+  async function salvarProdutoDefault() {
+    if (!empresaId) return
+    setSavingDefault(true)
+    try {
+      await apiPost(`/admin/empresas/${empresaId}/stripe-produto-default`, {
+        produto_id: defaultProdutoSelect || null,
+      })
+      toast.success(defaultProdutoSelect ? 'Produto padrão salvo' : 'Produto padrão removido')
+      const cfg = await apiGet<StripeConfig>(`/admin/empresas/${empresaId}/stripe-config`)
+      setConfig(cfg)
+      setDefaultProdutoSelect(cfg.produto_default_id || '')
+    } catch (err) {
+      toast.error('Erro ao salvar produto padrão', { description: (err as Error).message })
+    } finally {
+      setSavingDefault(false)
     }
   }
 
@@ -283,12 +307,67 @@ export default function IntegracoesStripe() {
         </div>
       </section>
 
+      {/* Produto padrão (fallback) — economia de cadastro pra empresa que vende um tipo só */}
+      <section className="rounded-lg border border-accent/30 bg-accent/[0.04] p-5">
+        <div className="mb-3 flex items-start gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent/15 text-accent">
+            <Sparkles size={18} />
+          </div>
+          <div>
+            <h2 className="font-semibold text-dark">Produto padrão (recomendado pra SaaS)</h2>
+            <p className="text-xs text-muted-dark">
+              Se você vende um único tipo de serviço (ex: assinatura SaaS / licenciamento), configure o produto padrão aqui e <strong>nunca mais precisa cadastrar price_id manualmente</strong>. Qualquer payment link novo da Stripe vai usar esse produto automaticamente. Mapeamentos explícitos abaixo continuam tendo prioridade.
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex-1 min-w-[260px]">
+            <label className={label}>Produto padrão pra invoices sem mapeamento explícito</label>
+            <select
+              className={input}
+              value={defaultProdutoSelect}
+              onChange={(ev) => setDefaultProdutoSelect(ev.target.value)}
+              disabled={servicos.length === 0}
+            >
+              <option value="">— nenhum (rejeitar invoice sem mapeamento) —</option>
+              {servicos.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.descricao} {s.codigo_lc116 ? `· LC116 ${s.codigo_lc116}` : '· SEM LC116!'}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button
+            onClick={salvarProdutoDefault}
+            disabled={savingDefault || defaultProdutoSelect === (config?.produto_default_id || '')}
+            className="inline-flex items-center gap-1 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-hover disabled:opacity-40"
+          >
+            <Save size={14} /> {savingDefault ? 'Salvando…' : 'Salvar'}
+          </button>
+        </div>
+        {config?.produto_default && (
+          <div className="mt-3 flex items-center gap-2 text-xs text-success">
+            <Check size={12} />
+            <span>
+              Configurado: <strong>{config.produto_default.descricao}</strong>
+              {config.produto_default.codigo_lc116 && ` · LC116 ${config.produto_default.codigo_lc116}`}
+              {' '}— qualquer payment link Stripe sem mapeamento explícito vai usar esse.
+            </span>
+          </div>
+        )}
+        {servicos.length === 0 && (
+          <p className="mt-3 text-xs text-warning">
+            Cadastre pelo menos um <strong>serviço</strong> em /produtos antes de configurar o produto padrão.
+          </p>
+        )}
+      </section>
+
       {/* Mapeamento price_id → serviço */}
       <section className="rounded-lg border border-black/[0.06] bg-white">
         <div className="flex items-center justify-between border-b border-black/[0.06] p-5">
           <div>
-            <h2 className="font-semibold text-dark">Mapeamento Stripe price_id → serviço</h2>
-            <p className="text-xs text-muted">Cada plano da Stripe (price_id) precisa estar mapeado pra um serviço (com LC 116) cadastrado.</p>
+            <h2 className="font-semibold text-dark">Mapeamento Stripe price_id → serviço (opcional)</h2>
+            <p className="text-xs text-muted">Só precisa cadastrar aqui se algum price_id específico tem que sair com serviço/LC 116 diferente do padrão acima.</p>
           </div>
           <button
             onClick={openNewMap}

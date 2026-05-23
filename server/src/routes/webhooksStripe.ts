@@ -42,11 +42,11 @@ export async function webhooksStripeRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: 'Body inválido (esperado Buffer)' })
     }
 
-    // 1. Carrega empresa + secret cifrado
+    // 1. Carrega empresa + secret cifrado + produto default (fallback)
     const { data: empresa } = await supabase
       .from('empresas')
       .select(
-        'id, municipio_emissor_codigo, endereco_codigo_ibge, stripe_webhook_secret_cifrado'
+        'id, municipio_emissor_codigo, endereco_codigo_ibge, stripe_webhook_secret_cifrado, stripe_produto_default_id'
       )
       .eq('id', empresaId)
       .maybeSingle()
@@ -122,6 +122,10 @@ export async function webhooksStripeRoutes(app: FastifyInstance) {
         return reply.status(200).send({ ok: false, erro: (e as Error).message })
       }
 
+      // Resolver produto: 1) mapeamento explícito por price_id, 2) fallback
+      // pro produto default da empresa. O fallback existe pra cobrir o caso
+      // comum em que a empresa só vende um tipo de serviço (ex: SaaS) e cria
+      // payment links na Stripe sem cadastrar cada price_id no admin.
       const { data: mapping } = await supabase
         .from('stripe_mapeamento')
         .select('produto_id, valor_unitario_override, ativo')
@@ -129,25 +133,35 @@ export async function webhooksStripeRoutes(app: FastifyInstance) {
         .eq('stripe_price_id', mapped.stripePriceId)
         .eq('ativo', true)
         .maybeSingle()
-      if (!mapping) {
+
+      let produtoId: string | null = mapping?.produto_id ?? null
+      let valorFinal = mapped.valorServicos
+      if (mapping?.valor_unitario_override) {
+        valorFinal = Number(mapping.valor_unitario_override)
+      }
+
+      if (!produtoId && empresa.stripe_produto_default_id) {
+        produtoId = empresa.stripe_produto_default_id
+        // Quando cai no fallback NUNCA aplicamos override — usamos sempre
+        // o amount_paid real da invoice. Override só faz sentido quando o
+        // usuário cadastrou um mapeamento específico pro price_id.
+      }
+
+      if (!produtoId) {
         await marcarEventoErro(
           evento.id,
-          `Sem mapeamento Stripe pra price_id=${mapped.stripePriceId}. Cadastre em /integracoes/stripe.`
+          `Sem mapeamento Stripe pra price_id=${mapped.stripePriceId} e sem produto default configurado. Cadastre em /integracoes/stripe.`
         )
         return reply.status(200).send({
           ok: false,
-          erro: `Sem mapeamento Stripe pra price_id=${mapped.stripePriceId}`,
+          erro: `Sem mapeamento Stripe pra price_id=${mapped.stripePriceId} e sem produto default configurado`,
         })
       }
-
-      const valorFinal = mapping.valor_unitario_override
-        ? Number(mapping.valor_unitario_override)
-        : mapped.valorServicos
 
       try {
         const result = await emitirNfse({
           empresaId,
-          produtoId: mapping.produto_id,
+          produtoId,
           tomadorOverride: mapped.tomador,
           valorServicos: valorFinal,
           descricao: mapped.descricao,

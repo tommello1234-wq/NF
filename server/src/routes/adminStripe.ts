@@ -49,7 +49,9 @@ export async function adminStripeRoutes(app: FastifyInstance) {
   app.get<{ Params: { empresaId: string } }>('/empresas/:empresaId/stripe-config', async (req, reply) => {
     const { data: empresa } = await supabase
       .from('empresas')
-      .select('id, nome, stripe_webhook_secret_cifrado')
+      .select(
+        'id, nome, stripe_webhook_secret_cifrado, stripe_produto_default_id, produtos:stripe_produto_default_id(id, descricao, codigo_lc116, aliquota_iss, ativo)'
+      )
       .eq('id', req.params.empresaId)
       .maybeSingle()
     if (!empresa) return reply.status(404).send({ error: 'Empresa não encontrada' })
@@ -58,8 +60,52 @@ export async function adminStripeRoutes(app: FastifyInstance) {
       empresa_nome: empresa.nome,
       secret_configurado: !!empresa.stripe_webhook_secret_cifrado,
       webhook_path: `/webhooks/stripe/${empresa.id}`,
+      produto_default_id: empresa.stripe_produto_default_id,
+      produto_default: empresa.produtos || null,
     }
   })
+
+  // ============ Produto default (fallback) ============
+
+  /**
+   * POST /admin/empresas/:empresaId/stripe-produto-default { produto_id }
+   * Aceita produto_id null/vazio pra LIMPAR o default.
+   *
+   * Esse campo é o que destrava o fluxo "empresa cria payment links na
+   * Stripe à vontade sem precisar cadastrar cada price_id no painel".
+   * Quando o webhook chega com price_id sem mapeamento explícito, usa
+   * esse produto pra emitir a NFS-e.
+   */
+  app.post<{ Params: { empresaId: string }; Body: { produto_id?: string | null } }>(
+    '/empresas/:empresaId/stripe-produto-default',
+    async (req, reply) => {
+      const produtoId = (req.body?.produto_id || '').trim()
+      if (!produtoId) {
+        const { error } = await supabase
+          .from('empresas')
+          .update({ stripe_produto_default_id: null, updated_at: new Date().toISOString() })
+          .eq('id', req.params.empresaId)
+        if (error) return reply.status(500).send({ error: error.message })
+        return { ok: true, configurado: false }
+      }
+      // Valida que o produto existe e pertence à mesma empresa antes de salvar
+      const { data: prod } = await supabase
+        .from('produtos')
+        .select('id, empresa_id, ativo')
+        .eq('id', produtoId)
+        .maybeSingle()
+      if (!prod) return reply.status(404).send({ error: 'Produto não encontrado' })
+      if (prod.empresa_id !== req.params.empresaId) {
+        return reply.status(400).send({ error: 'Produto pertence a outra empresa' })
+      }
+      const { error } = await supabase
+        .from('empresas')
+        .update({ stripe_produto_default_id: produtoId, updated_at: new Date().toISOString() })
+        .eq('id', req.params.empresaId)
+      if (error) return reply.status(500).send({ error: error.message })
+      return { ok: true, configurado: true, produto_id: produtoId }
+    }
+  )
 
   // ============ Mapeamento stripe_price_id → produto_id ============
 
