@@ -17,8 +17,8 @@ export async function adminStripeRoutes(app: FastifyInstance) {
 
   // ============ Webhook secret por empresa ============
 
-  /** PUT /admin/empresas/:empresaId/stripe-secret { secret } */
-  app.put<{ Params: { empresaId: string }; Body: { secret?: string } }>(
+  /** POST /admin/empresas/:empresaId/stripe-secret { secret } */
+  app.post<{ Params: { empresaId: string }; Body: { secret?: string } }>(
     '/empresas/:empresaId/stripe-secret',
     async (req, reply) => {
       const secret = (req.body?.secret || '').trim()

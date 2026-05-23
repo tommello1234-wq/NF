@@ -17,8 +17,8 @@ export async function adminTictoRoutes(app: FastifyInstance) {
 
   // ============ Token webhook por empresa ============
 
-  /** PUT /admin/empresas/:empresaId/ticto-token { token } */
-  app.put<{ Params: { empresaId: string }; Body: { token?: string } }>(
+  /** POST /admin/empresas/:empresaId/ticto-token { token } */
+  app.post<{ Params: { empresaId: string }; Body: { token?: string } }>(
     '/empresas/:empresaId/ticto-token',
     async (req, reply) => {
       const token = (req.body?.token || '').trim()
