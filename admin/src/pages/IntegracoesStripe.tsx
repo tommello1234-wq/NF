@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Check, Copy, CreditCard, Edit2, Plus, RefreshCw, Save, Sparkles, Trash2, X } from 'lucide-react'
+import { Check, Copy, CreditCard, Edit2, Plus, Play, RefreshCw, Save, Sparkles, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { apiDelete, apiGet, apiPatch, apiPost } from '../lib/api'
 import { useEmpresaAtual } from '../lib/empresaContext'
@@ -204,6 +204,26 @@ export default function IntegracoesStripe() {
       toast.error('Erro ao salvar mapeamento', { description: (err as Error).message })
     } finally {
       setSavingMap(false)
+    }
+  }
+
+  async function reprocessarEvento(ev: WebhookEvent) {
+    if (!confirm(`Reprocessar evento ${ev.external_id}? Vai tentar emitir a NFS-e usando o payload já recebido.`)) return
+    try {
+      const result = await apiPost<{ ok: boolean; status?: string; nota_id?: string; erro?: string }>(
+        `/admin/webhook-events/${ev.id}/reprocessar`,
+        {}
+      )
+      if (result.ok && result.status === 'autorizada') {
+        toast.success('NFS-e autorizada!', { description: `Nota ID: ${result.nota_id}` })
+      } else if (result.ok) {
+        toast.warning(`Status: ${result.status || 'desconhecido'}`)
+      } else {
+        toast.error('Reprocessamento falhou', { description: result.erro })
+      }
+      if (empresaId) loadAll(empresaId)
+    } catch (err) {
+      toast.error('Erro ao reprocessar', { description: (err as Error).message })
     }
   }
 
@@ -426,6 +446,9 @@ export default function IntegracoesStripe() {
       <section className="rounded-lg border border-black/[0.06] bg-white">
         <div className="border-b border-black/[0.06] p-5">
           <h2 className="font-semibold text-dark">Histórico de eventos recebidos (200 últimos)</h2>
+          <p className="text-xs text-muted">
+            Eventos com erro podem ser reprocessados — o backend usa o payload já recebido (não chama Stripe de novo) e tenta emitir a NFS-e. Útil depois de configurar CPF custom field, produto padrão ou mapeamento.
+          </p>
         </div>
         <table className="w-full text-sm">
           <thead>
@@ -435,20 +458,35 @@ export default function IntegracoesStripe() {
               <th className="px-4 py-3 text-left text-[11px] uppercase text-muted">Status</th>
               <th className="px-4 py-3 text-left text-[11px] uppercase text-muted">Stripe event ID</th>
               <th className="px-4 py-3 text-left text-[11px] uppercase text-muted">Erro</th>
+              <th className="px-4 py-3 text-left text-[11px] uppercase text-muted">Ação</th>
             </tr>
           </thead>
           <tbody>
             {eventos.length === 0 ? (
-              <tr><td colSpan={5} className="px-4 py-8 text-center text-muted">Nenhum evento recebido ainda.</td></tr>
-            ) : eventos.map((ev) => (
-              <tr key={ev.id} className="border-b border-black/[0.04] hover:bg-light-secondary">
-                <td className="px-4 py-3 text-xs text-muted">{dateTime(ev.recebido_em)}</td>
-                <td className="px-4 py-3 font-mono text-xs">{ev.event_type || '-'}</td>
-                <td className="px-4 py-3">{statusBadge(ev.status)}</td>
-                <td className="px-4 py-3 font-mono text-xs">{ev.external_id}</td>
-                <td className="px-4 py-3 text-xs text-error">{ev.erro || ''}</td>
-              </tr>
-            ))}
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-muted">Nenhum evento recebido ainda.</td></tr>
+            ) : eventos.map((ev) => {
+              const podeReprocessar = ev.status === 'erro' && ev.event_type === 'invoice.payment_succeeded'
+              return (
+                <tr key={ev.id} className="border-b border-black/[0.04] hover:bg-light-secondary">
+                  <td className="px-4 py-3 text-xs text-muted">{dateTime(ev.recebido_em)}</td>
+                  <td className="px-4 py-3 font-mono text-xs">{ev.event_type || '-'}</td>
+                  <td className="px-4 py-3">{statusBadge(ev.status)}</td>
+                  <td className="px-4 py-3 font-mono text-xs">{ev.external_id}</td>
+                  <td className="px-4 py-3 text-xs text-error max-w-[300px]">{ev.erro || ''}</td>
+                  <td className="px-4 py-3">
+                    {podeReprocessar && (
+                      <button
+                        onClick={() => reprocessarEvento(ev)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-accent/30 bg-accent/5 px-2.5 py-1.5 text-xs font-medium text-accent hover:bg-accent/10"
+                        title="Tentar emitir NFS-e novamente usando o payload já recebido"
+                      >
+                        <Play size={11} /> Reprocessar
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </section>
