@@ -1,5 +1,5 @@
 import {
-  extrairCpfCnpjBrasileiro,
+  extrairCpfCnpjDeTudo,
   extrairPriceId,
   extrairSubscriptionId,
   type StripeInvoiceLike,
@@ -61,11 +61,13 @@ export function mapearStripeInvoiceParaEmissao(
     throw new Error(`Valor inválido no invoice Stripe: ${centavos} centavos`)
   }
 
-  const docs = extrairCpfCnpjBrasileiro(invoice.customer_tax_ids)
+  const docs = extrairCpfCnpjDeTudo(invoice)
   if (!docs.cpf && !docs.cnpj) {
     throw new Error(
-      'Invoice Stripe sem CPF/CNPJ no customer_tax_ids. ' +
-        'Habilite tax_id_collection no Checkout ou crie o Customer com tax_ids brasileiros.'
+      'Invoice Stripe sem CPF/CNPJ. Verificado: customer_tax_ids, ' +
+        'invoice.custom_fields (Payment Link), invoice.metadata e ' +
+        'subscription.metadata. Habilite tax_id_collection no Checkout, ' +
+        'ou adicione um custom field "CPF"/"CNPJ" no Payment Link.'
     )
   }
 

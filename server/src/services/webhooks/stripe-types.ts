@@ -44,17 +44,40 @@ export interface StripeInvoiceLike {
     country?: string | null
   } | null
   customer_tax_ids?: Array<{ type: string; value: string }> | null
+  // Custom fields preenchidos pelo cliente no Payment Link / Checkout.
+  // Formatos conhecidos:
+  //   Invoice nativo:  [{ name: "CPF", value: "123.456.789-00" }]
+  //   Checkout:        [{ key, label, type, text: { value: "..." }, ... }]
+  custom_fields?: Array<StripeCustomFieldLike> | null
+  metadata?: Record<string, string> | null
   // Campo que pode estar em invoice.subscription (versões antigas)
   // ou invoice.parent.subscription_details.subscription (versões novas)
   subscription?: string | { id?: string } | null
   parent?: {
     subscription_details?: {
       subscription?: string | { id?: string } | null
+      metadata?: Record<string, string> | null
     } | null
   } | null
   lines?: {
     data?: Array<StripeInvoiceLineLike>
   } | null
+}
+
+/**
+ * Formato bem flexível pra custom field — abrange tanto o formato simples
+ * de invoice quanto o complexo de checkout session (que tem key/label/text).
+ */
+export interface StripeCustomFieldLike {
+  // Formato simples (invoice.custom_fields)
+  name?: string | null
+  value?: string | null
+  // Formato checkout session (que pode ser copiado pro invoice)
+  key?: string | null
+  label?: string | { custom?: string } | null
+  text?: { value?: string | null } | null
+  numeric?: { value?: string | null } | null
+  dropdown?: { value?: string | null } | null
 }
 
 export interface StripeInvoiceLineLike {
@@ -86,6 +109,132 @@ export function extrairCpfCnpjBrasileiro(
   if (cnpjTax?.value) {
     const cnpj = cnpjTax.value.replace(/\D/g, '')
     if (cnpj.length === 14) return { cnpj }
+  }
+  return {}
+}
+
+/**
+ * Extrai o valor "textual" de um custom field, lidando com os 2 formatos
+ * conhecidos (invoice nativo: {name,value} vs checkout: {key,label,text:{value}}).
+ */
+function valorDoCustomField(cf: StripeCustomFieldLike): string | undefined {
+  if (cf.value) return cf.value
+  if (cf.text?.value) return cf.text.value
+  if (cf.numeric?.value) return cf.numeric.value
+  if (cf.dropdown?.value) return cf.dropdown.value
+  return undefined
+}
+
+/** Extrai a "key" textual pra matching — usa name OU key OU label. */
+function chaveDoCustomField(cf: StripeCustomFieldLike): string {
+  if (cf.name) return cf.name
+  if (cf.key) return cf.key
+  if (typeof cf.label === 'string') return cf.label
+  if (cf.label && typeof cf.label === 'object' && cf.label.custom) return cf.label.custom
+  return ''
+}
+
+/**
+ * Heurística pra ver se uma "key" parece referir a CPF/CNPJ/Documento.
+ * Aceita CPF, cpf, Cpf, "CPF/CNPJ", "Documento", "Tax ID", "tax_id", etc.
+ */
+function pareceCampoDoc(key: string): { kind: 'cpf' | 'cnpj' | 'qualquer' } | null {
+  const k = key
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '') // remove acentos
+    .replace(/[^a-z0-9]/g, '') // remove pontuação/espaços
+  if (!k) return null
+  if (k === 'cpf' || k.includes('cpf') && !k.includes('cnpj')) return { kind: 'cpf' }
+  if (k === 'cnpj' || (k.includes('cnpj') && !k.includes('cpf'))) return { kind: 'cnpj' }
+  // Genéricos — decide pelo tamanho dos dígitos depois
+  if (
+    k === 'documento' ||
+    k === 'doc' ||
+    k === 'taxid' ||
+    k === 'documentofiscal' ||
+    k.includes('cpfcnpj') ||
+    k.includes('cnpjcpf') ||
+    k === 'identidade'
+  ) {
+    return { kind: 'qualquer' }
+  }
+  return null
+}
+
+/**
+ * Tenta extrair CPF/CNPJ de TUDO QUE A STRIPE OFERECE:
+ *   1. customer_tax_ids (oficial, formato br_cpf/br_cnpj)
+ *   2. invoice.custom_fields (custom field do Payment Link)
+ *   3. invoice.metadata.{cpf,cnpj,documento,...}
+ *   4. invoice.parent.subscription_details.metadata.{...}
+ *
+ * Ordem importa: tax_ids tem prioridade porque é o lugar "oficial".
+ */
+export function extrairCpfCnpjDeTudo(
+  invoice: StripeInvoiceLike
+): { cpf?: string; cnpj?: string; fonte?: string } {
+  // 1. tax_ids oficial
+  const fromTax = extrairCpfCnpjBrasileiro(invoice.customer_tax_ids)
+  if (fromTax.cpf) return { cpf: fromTax.cpf, fonte: 'customer_tax_ids' }
+  if (fromTax.cnpj) return { cnpj: fromTax.cnpj, fonte: 'customer_tax_ids' }
+
+  // 2. invoice.custom_fields
+  if (invoice.custom_fields && invoice.custom_fields.length > 0) {
+    for (const cf of invoice.custom_fields) {
+      const key = chaveDoCustomField(cf)
+      const hint = pareceCampoDoc(key)
+      if (!hint) continue
+      const raw = valorDoCustomField(cf)
+      if (!raw) continue
+      const digits = raw.replace(/\D/g, '')
+      if (hint.kind === 'cpf' && digits.length === 11) {
+        return { cpf: digits, fonte: `custom_fields.${key}` }
+      }
+      if (hint.kind === 'cnpj' && digits.length === 14) {
+        return { cnpj: digits, fonte: `custom_fields.${key}` }
+      }
+      if (hint.kind === 'qualquer') {
+        if (digits.length === 11) return { cpf: digits, fonte: `custom_fields.${key}` }
+        if (digits.length === 14) return { cnpj: digits, fonte: `custom_fields.${key}` }
+      }
+    }
+  }
+
+  // 3. invoice.metadata
+  const fromMeta = extrairDeMetadata(invoice.metadata, 'invoice.metadata')
+  if (fromMeta.cpf || fromMeta.cnpj) return fromMeta
+
+  // 4. subscription_details.metadata (versões novas da API)
+  const fromSub = extrairDeMetadata(
+    invoice.parent?.subscription_details?.metadata,
+    'subscription.metadata'
+  )
+  if (fromSub.cpf || fromSub.cnpj) return fromSub
+
+  return {}
+}
+
+function extrairDeMetadata(
+  meta: Record<string, string> | null | undefined,
+  fontePrefix: string
+): { cpf?: string; cnpj?: string; fonte?: string } {
+  if (!meta) return {}
+  for (const [key, value] of Object.entries(meta)) {
+    if (!value) continue
+    const hint = pareceCampoDoc(key)
+    if (!hint) continue
+    const digits = String(value).replace(/\D/g, '')
+    if (hint.kind === 'cpf' && digits.length === 11) {
+      return { cpf: digits, fonte: `${fontePrefix}.${key}` }
+    }
+    if (hint.kind === 'cnpj' && digits.length === 14) {
+      return { cnpj: digits, fonte: `${fontePrefix}.${key}` }
+    }
+    if (hint.kind === 'qualquer') {
+      if (digits.length === 11) return { cpf: digits, fonte: `${fontePrefix}.${key}` }
+      if (digits.length === 14) return { cnpj: digits, fonte: `${fontePrefix}.${key}` }
+    }
   }
   return {}
 }
