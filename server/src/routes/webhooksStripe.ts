@@ -5,8 +5,12 @@ import { decryptSecret } from '../services/crypto-utils.js'
 import { emitirNfse } from '../services/nfse/orquestrador.js'
 import { mapearStripeInvoiceParaEmissao } from '../services/webhooks/stripe-mapper.js'
 import {
+  extrairCpfCnpjDeCheckout,
+  extrairCustomerId,
+  isEventoCapturarDoc,
   isEventoEmitir,
   isEventoRegistrar,
+  type StripeCheckoutSessionLike,
   type StripeInvoiceLike,
 } from '../services/webhooks/stripe-types.js'
 
@@ -118,8 +122,45 @@ export async function webhooksStripeRoutes(app: FastifyInstance) {
       try {
         mapped = mapearStripeInvoiceParaEmissao(invoice, cMunFallback)
       } catch (e) {
-        await marcarEventoErro(evento.id, (e as Error).message)
-        return reply.status(200).send({ ok: false, erro: (e as Error).message })
+        const msg = (e as Error).message
+        // Antes de desistir por falta de CPF, busca em stripe_customer_doc
+        // — onde a gente guarda o CPF que veio do checkout.session.completed
+        // anterior (custom field do Payment Link).
+        if (msg.includes('CPF/CNPJ')) {
+          const customerId = extrairCustomerId(invoice)
+          if (customerId) {
+            const { data: doc } = await supabase
+              .from('stripe_customer_doc')
+              .select('cpf, cnpj, nome, email')
+              .eq('empresa_id', empresaId)
+              .eq('stripe_customer_id', customerId)
+              .maybeSingle()
+            if (doc && (doc.cpf || doc.cnpj)) {
+              // Re-tenta o mapper depois de injetar tax_id no invoice
+              const invoiceComDoc: StripeInvoiceLike = {
+                ...invoice,
+                customer_tax_ids: [
+                  ...(invoice.customer_tax_ids || []),
+                  doc.cpf
+                    ? { type: 'br_cpf', value: doc.cpf }
+                    : { type: 'br_cnpj', value: doc.cnpj! },
+                ],
+                customer_name: invoice.customer_name || doc.nome || undefined,
+                customer_email: invoice.customer_email || doc.email || undefined,
+              }
+              try {
+                mapped = mapearStripeInvoiceParaEmissao(invoiceComDoc, cMunFallback)
+              } catch (e2) {
+                await marcarEventoErro(evento.id, (e2 as Error).message)
+                return reply.status(200).send({ ok: false, erro: (e2 as Error).message })
+              }
+            }
+          }
+        }
+        if (!mapped) {
+          await marcarEventoErro(evento.id, msg)
+          return reply.status(200).send({ ok: false, erro: msg })
+        }
       }
 
       // Resolver produto: 1) mapeamento explícito por price_id, 2) fallback
@@ -181,6 +222,71 @@ export async function webhooksStripeRoutes(app: FastifyInstance) {
         await marcarEventoErro(evento.id, (e as Error).message)
         return reply.status(200).send({ ok: false, erro: (e as Error).message })
       }
+    }
+
+    // 5a-bis. checkout.session.completed → captura CPF do custom_field
+    //                                       e guarda em stripe_customer_doc
+    if (isEventoCapturarDoc(event.type)) {
+      const session = event.data.object as unknown as StripeCheckoutSessionLike
+      const customerId = extrairCustomerId(session)
+      const docs = extrairCpfCnpjDeCheckout(session)
+      if (!customerId) {
+        await supabase
+          .from('webhook_events')
+          .update({
+            status: 'ignorado',
+            erro: 'Checkout sem customer_id — sem como mapear pro invoice depois',
+            processado_em: new Date().toISOString(),
+          })
+          .eq('id', evento.id)
+        return reply.status(200).send({ ok: true, ignored: true, motivo: 'sem customer_id' })
+      }
+      if (!docs.cpf && !docs.cnpj) {
+        await supabase
+          .from('webhook_events')
+          .update({
+            status: 'ignorado',
+            erro: 'Checkout sem CPF/CNPJ no custom_fields/tax_ids/metadata',
+            processado_em: new Date().toISOString(),
+          })
+          .eq('id', evento.id)
+        return reply.status(200).send({ ok: true, ignored: true, motivo: 'sem CPF/CNPJ no checkout' })
+      }
+      // Upsert na tabela de mapping — se o mesmo customer já tinha CPF, atualiza.
+      const { error: upErr } = await supabase
+        .from('stripe_customer_doc')
+        .upsert(
+          {
+            empresa_id: empresaId,
+            stripe_customer_id: customerId,
+            cpf: docs.cpf || null,
+            cnpj: docs.cnpj || null,
+            nome: docs.nome || null,
+            email: docs.email || null,
+            fonte: docs.fonte || null,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'empresa_id,stripe_customer_id' }
+        )
+      if (upErr) {
+        await marcarEventoErro(evento.id, `Erro ao salvar doc: ${upErr.message}`)
+        return reply.status(200).send({ ok: false, erro: upErr.message })
+      }
+      await supabase
+        .from('webhook_events')
+        .update({
+          status: 'processado',
+          erro: null,
+          processado_em: new Date().toISOString(),
+        })
+        .eq('id', evento.id)
+      return reply.status(200).send({
+        ok: true,
+        captured: true,
+        customer_id: customerId,
+        documento: docs.cpf ? `CPF ${docs.cpf}` : `CNPJ ${docs.cnpj}`,
+        fonte: docs.fonte,
+      })
     }
 
     // 5b. Eventos só pra registrar

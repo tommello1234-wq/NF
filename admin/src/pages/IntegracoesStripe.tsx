@@ -287,7 +287,7 @@ export default function IntegracoesStripe() {
               </button>
             </div>
             <p className="mt-1 text-[11px] text-muted">
-              Evento mínimo: <strong>invoice.payment_succeeded</strong> (assinatura paga, incluindo renovação automática). Opcionais úteis: <em>invoice.payment_failed</em>, <em>charge.refunded</em>.
+              Eventos necessários: <strong>invoice.payment_succeeded</strong> (emite a NFS-e) <strong>+ checkout.session.completed</strong> (captura CPF do custom field no Payment Link — sem esse evento, o CPF nunca chega no backend). Opcionais úteis: <em>invoice.payment_failed</em>, <em>charge.refunded</em>.
             </p>
           </div>
 

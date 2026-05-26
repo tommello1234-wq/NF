@@ -5,7 +5,10 @@ import { authAdmin } from '../middleware/authAdmin.js'
 import { encryptSecret } from '../services/crypto-utils.js'
 import { emitirNfse } from '../services/nfse/orquestrador.js'
 import { mapearStripeInvoiceParaEmissao } from '../services/webhooks/stripe-mapper.js'
-import type { StripeInvoiceLike } from '../services/webhooks/stripe-types.js'
+import {
+  extrairCustomerId,
+  type StripeInvoiceLike,
+} from '../services/webhooks/stripe-types.js'
 
 const mapeamentoSchema = z.object({
   empresa_id: z.string().uuid(),
@@ -216,8 +219,43 @@ export async function adminStripeRoutes(app: FastifyInstance) {
     try {
       mapped = mapearStripeInvoiceParaEmissao(invoice, cMunFallback)
     } catch (e) {
-      await marcarEventoErro(evento.id, (e as Error).message)
-      return reply.status(200).send({ ok: false, erro: (e as Error).message })
+      const msg = (e as Error).message
+      // Mesmo fallback que o webhook em runtime: busca CPF guardado da
+      // checkout.session.completed em stripe_customer_doc antes de desistir.
+      if (msg.includes('CPF/CNPJ')) {
+        const customerId = extrairCustomerId(invoice)
+        if (customerId) {
+          const { data: doc } = await supabase
+            .from('stripe_customer_doc')
+            .select('cpf, cnpj, nome, email')
+            .eq('empresa_id', evento.empresa_id)
+            .eq('stripe_customer_id', customerId)
+            .maybeSingle()
+          if (doc && (doc.cpf || doc.cnpj)) {
+            const invoiceComDoc: StripeInvoiceLike = {
+              ...invoice,
+              customer_tax_ids: [
+                ...(invoice.customer_tax_ids || []),
+                doc.cpf
+                  ? { type: 'br_cpf', value: doc.cpf }
+                  : { type: 'br_cnpj', value: doc.cnpj! },
+              ],
+              customer_name: invoice.customer_name || doc.nome || undefined,
+              customer_email: invoice.customer_email || doc.email || undefined,
+            }
+            try {
+              mapped = mapearStripeInvoiceParaEmissao(invoiceComDoc, cMunFallback)
+            } catch (e2) {
+              await marcarEventoErro(evento.id, (e2 as Error).message)
+              return reply.status(200).send({ ok: false, erro: (e2 as Error).message })
+            }
+          }
+        }
+      }
+      if (!mapped) {
+        await marcarEventoErro(evento.id, msg)
+        return reply.status(200).send({ ok: false, erro: msg })
+      }
     }
 
     const { data: mapping } = await supabase

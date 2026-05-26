@@ -13,6 +13,17 @@ export const STRIPE_EVENTOS_EMITIR = [
   // 'checkout.session.completed', // pagamento único — adicionar quando suportar
 ] as const
 
+/**
+ * Eventos que SÓ capturam CPF/CNPJ do custom field (sem emitir nota).
+ * O `checkout.session.completed` é a única forma de pegar o que o cliente
+ * preencheu no custom field "CPF" do Payment Link — a Stripe não copia
+ * isso pro invoice depois. A gente salva em stripe_customer_doc e usa
+ * quando o invoice.payment_succeeded chegar (segundos depois).
+ */
+export const STRIPE_EVENTOS_CAPTURAR_DOC = [
+  'checkout.session.completed',
+] as const
+
 /** Eventos só pra registrar (futuro: cancelar nota?) */
 export const STRIPE_EVENTOS_REGISTRAR = [
   'invoice.payment_failed',
@@ -24,6 +35,10 @@ export function isEventoEmitir(type: string): boolean {
   return (STRIPE_EVENTOS_EMITIR as readonly string[]).includes(type)
 }
 
+export function isEventoCapturarDoc(type: string): boolean {
+  return (STRIPE_EVENTOS_CAPTURAR_DOC as readonly string[]).includes(type)
+}
+
 export function isEventoRegistrar(type: string): boolean {
   return (STRIPE_EVENTOS_REGISTRAR as readonly string[]).includes(type)
 }
@@ -33,6 +48,9 @@ export interface StripeInvoiceLike {
   id?: string
   amount_paid?: number
   description?: string | null
+  // Em invoice o campo customer normalmente é só uma string com o id ("cus_...")
+  // mas algumas versões da API expandem pra objeto. Aceita os dois.
+  customer?: string | { id?: string } | null
   customer_name?: string | null
   customer_email?: string | null
   customer_address?: {
@@ -62,6 +80,24 @@ export interface StripeInvoiceLike {
   lines?: {
     data?: Array<StripeInvoiceLineLike>
   } | null
+}
+
+/**
+ * Shape mínimo do checkout.session.completed que precisamos pra capturar
+ * o CPF/CNPJ que o cliente preencheu no custom field do Payment Link.
+ */
+export interface StripeCheckoutSessionLike {
+  id?: string
+  customer?: string | { id?: string } | null
+  customer_email?: string | null
+  customer_details?: {
+    name?: string | null
+    email?: string | null
+    tax_ids?: Array<{ type: string; value: string }> | null
+  } | null
+  custom_fields?: Array<StripeCustomFieldLike> | null
+  metadata?: Record<string, string> | null
+  payment_status?: string | null
 }
 
 /**
@@ -213,6 +249,61 @@ export function extrairCpfCnpjDeTudo(
   if (fromSub.cpf || fromSub.cnpj) return fromSub
 
   return {}
+}
+
+/**
+ * Extrai CPF/CNPJ de uma checkout.session.completed — varre custom_fields,
+ * metadata, e tax_ids (em customer_details). Retorna a fonte exata pra
+ * auditoria depois.
+ */
+export function extrairCpfCnpjDeCheckout(
+  session: StripeCheckoutSessionLike
+): { cpf?: string; cnpj?: string; fonte?: string; nome?: string; email?: string } {
+  const nome = session.customer_details?.name || undefined
+  const email = session.customer_details?.email || session.customer_email || undefined
+
+  // 1. customer_details.tax_ids (se tax_id_collection habilitado)
+  const fromTax = extrairCpfCnpjBrasileiro(session.customer_details?.tax_ids)
+  if (fromTax.cpf) return { cpf: fromTax.cpf, fonte: 'checkout.customer_details.tax_ids', nome, email }
+  if (fromTax.cnpj) return { cnpj: fromTax.cnpj, fonte: 'checkout.customer_details.tax_ids', nome, email }
+
+  // 2. custom_fields — formato checkout: {key, label, text:{value}}
+  if (session.custom_fields && session.custom_fields.length > 0) {
+    for (const cf of session.custom_fields) {
+      const key = chaveDoCustomField(cf)
+      const hint = pareceCampoDoc(key)
+      if (!hint) continue
+      const raw = valorDoCustomField(cf)
+      if (!raw) continue
+      const digits = raw.replace(/\D/g, '')
+      if (hint.kind === 'cpf' && digits.length === 11) {
+        return { cpf: digits, fonte: `checkout.custom_fields.${key}`, nome, email }
+      }
+      if (hint.kind === 'cnpj' && digits.length === 14) {
+        return { cnpj: digits, fonte: `checkout.custom_fields.${key}`, nome, email }
+      }
+      if (hint.kind === 'qualquer') {
+        if (digits.length === 11) return { cpf: digits, fonte: `checkout.custom_fields.${key}`, nome, email }
+        if (digits.length === 14) return { cnpj: digits, fonte: `checkout.custom_fields.${key}`, nome, email }
+      }
+    }
+  }
+
+  // 3. session.metadata
+  const fromMeta = extrairDeMetadata(session.metadata, 'checkout.metadata')
+  if (fromMeta.cpf || fromMeta.cnpj) return { ...fromMeta, nome, email }
+
+  return { nome, email }
+}
+
+/** Pega o customer_id (string) tolerante a múltiplos formatos da Stripe. */
+export function extrairCustomerId(obj: {
+  customer?: string | { id?: string } | null
+}): string | undefined {
+  const c = obj.customer
+  if (typeof c === 'string') return c
+  if (c && typeof c === 'object' && c.id) return c.id
+  return undefined
 }
 
 function extrairDeMetadata(
