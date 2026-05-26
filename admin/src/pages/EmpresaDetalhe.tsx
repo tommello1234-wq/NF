@@ -61,6 +61,8 @@ interface Empresa {
   proximo_numero_dps?: number | null
   nfse_codigo_lc116_padrao?: string | null
   nfse_codigo_tributario_municipal_padrao?: string | null
+  emite_nfse?: boolean | null
+  emite_nfe?: boolean | null
 }
 
 interface CertStatus {
@@ -132,6 +134,8 @@ const emptyForm = {
   nfse_codigo_tributario_municipal_padrao: '',
   regime_especial_tributacao: '',
   incentivo_fiscal: false,
+  emite_nfse: true,
+  emite_nfe: false,
 }
 
 function onlyDigits(value: string) {
@@ -188,6 +192,9 @@ function toForm(empresa: Empresa) {
     nfse_codigo_tributario_municipal_padrao: empresa.nfse_codigo_tributario_municipal_padrao || '',
     regime_especial_tributacao: empresa.regime_especial_tributacao || '',
     incentivo_fiscal: Boolean(empresa.incentivo_fiscal),
+    // Default: emite_nfse vem como true se DB ainda não tem o campo, emite_nfe como false
+    emite_nfse: empresa.emite_nfse === null || empresa.emite_nfse === undefined ? true : Boolean(empresa.emite_nfse),
+    emite_nfe: Boolean(empresa.emite_nfe),
   }
 }
 
@@ -428,6 +435,34 @@ export default function EmpresaDetalhe() {
           <button onClick={salvarEmpresa} disabled={savingEmpresa} className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-hover disabled:opacity-50">
             <Save size={14} /> {savingEmpresa ? 'Salvando...' : 'Salvar'}
           </button>
+        </div>
+
+        {/* Tipo do workspace: define o que aparece na sidebar pra essa empresa */}
+        <div className="mb-4 rounded-lg border border-accent/30 bg-accent/[0.04] p-4">
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-accent">O que essa empresa emite?</div>
+          <p className="mb-3 text-xs text-muted-dark">
+            Define quais módulos aparecem na sidebar quando essa empresa está como workspace ativo. Por exemplo: uma empresa de SaaS só precisa de NFS-e; uma ótica precisa dos dois (NFS-e pro exame + NF-e/NFC-e pro óculos).
+          </p>
+          <div className="flex flex-wrap gap-4">
+            <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-black/[0.08] bg-white px-3 py-2 text-sm">
+              <input
+                type="checkbox"
+                checked={form.emite_nfse}
+                onChange={(event) => setForm((current) => ({ ...current, emite_nfse: event.target.checked }))}
+                className="h-4 w-4"
+              />
+              <span><strong>NFS-e</strong> <span className="text-muted">— serviços (LC 116, ISS)</span></span>
+            </label>
+            <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-black/[0.08] bg-white px-3 py-2 text-sm">
+              <input
+                type="checkbox"
+                checked={form.emite_nfe}
+                onChange={(event) => setForm((current) => ({ ...current, emite_nfe: event.target.checked }))}
+                className="h-4 w-4"
+              />
+              <span><strong>NF-e / NFC-e</strong> <span className="text-muted">— mercadoria (ICMS, NCM/CFOP)</span></span>
+            </label>
+          </div>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">

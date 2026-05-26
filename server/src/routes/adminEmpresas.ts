@@ -51,6 +51,9 @@ const empresaSchema = z.object({
   proximo_numero_dps: z.coerce.number().int().min(1).optional(),
   nfse_codigo_lc116_padrao: z.string().optional().nullable(),
   nfse_codigo_tributario_municipal_padrao: z.string().optional().nullable(),
+  // Flags que controlam o que a sidebar mostra pra empresa (workspace ativo).
+  emite_nfse: z.boolean().optional(),
+  emite_nfe: z.boolean().optional(),
 })
 
 function cleanDoc(value?: string | null) {

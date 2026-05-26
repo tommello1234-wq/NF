@@ -22,6 +22,7 @@ function Layout({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate()
   const location = useLocation()
   const [email, setEmail] = useState<string | null>(null)
+  const { empresaAtual } = useEmpresaAtual()
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setEmail(data.user?.email || null))
@@ -32,19 +33,25 @@ function Layout({ children }: { children: React.ReactNode }) {
     navigate('/login')
   }
 
+  // Flags por workspace. Defaults seguros: NFS-e ligado (mais comum), NF-e
+  // desligado (precisa SEFAZ/CSC configurado). UPWARD fica só com NFS-e
+  // e some "Vendas/NF-e" do menu; NORTE-LAB ativa NF-e e ganha esses itens.
+  const emiteNfse = empresaAtual?.emite_nfse !== false
+  const emiteNfe = empresaAtual?.emite_nfe === true
+
   const nav = [
-    { to: '/empresas', label: 'Empresas', icon: Building2 },
-    { to: '/clientes', label: 'Clientes', icon: Users },
-    { to: '/produtos', label: 'Produtos & Serviços', icon: Package },
-    { to: '/vendas', label: 'Vendas (NFC-e auto)', icon: ShoppingCart },
-    { to: '/fiscal', label: 'Fiscal', icon: Settings2 },
-    { to: '/nfse', label: 'NFS-e', icon: FileSignature },
-    { to: '/nfe', label: 'NF-e / NFC-e', icon: FileText },
-    { to: '/integracoes/ticto', label: 'Integração Ticto', icon: Plug },
-    { to: '/integracoes/stripe', label: 'Integração Stripe', icon: CreditCard },
-    { to: '/notas', label: 'Notas (legado)', icon: FileText },
-    { to: '/darfs', label: 'DARF', icon: ReceiptText },
-  ]
+    { to: '/empresas', label: 'Empresas', icon: Building2, show: true },
+    { to: '/clientes', label: 'Clientes', icon: Users, show: true },
+    { to: '/produtos', label: 'Produtos & Serviços', icon: Package, show: true },
+    { to: '/vendas', label: 'Vendas (NFC-e auto)', icon: ShoppingCart, show: emiteNfe },
+    { to: '/fiscal', label: 'Fiscal', icon: Settings2, show: true },
+    { to: '/nfse', label: 'NFS-e', icon: FileSignature, show: emiteNfse },
+    { to: '/nfe', label: 'NF-e / NFC-e', icon: FileText, show: emiteNfe },
+    { to: '/integracoes/ticto', label: 'Integração Ticto', icon: Plug, show: emiteNfse },
+    { to: '/integracoes/stripe', label: 'Integração Stripe', icon: CreditCard, show: emiteNfse },
+    { to: '/notas', label: 'Notas (legado)', icon: FileText, show: true },
+    { to: '/darfs', label: 'DARF', icon: ReceiptText, show: true },
+  ].filter((item) => item.show)
 
   return (
     <div className="flex h-screen bg-light-secondary">

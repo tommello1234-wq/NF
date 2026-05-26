@@ -27,6 +27,11 @@ export interface EmpresaCampos {
   csc_id_prod?: string | null
   csc_token_prod?: string | null
   status_fiscal?: string | null
+  // Flags que controlam quais módulos aparecem na sidebar pra cada workspace.
+  // emite_nfse default true (quase todo mundo emite serviço); emite_nfe default
+  // false (só ativa pra quem vende mercadoria e tem CSC/SEFAZ configurados).
+  emite_nfse?: boolean | null
+  emite_nfe?: boolean | null
 }
 
 export interface CampoPendente {
