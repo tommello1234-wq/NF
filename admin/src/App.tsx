@@ -38,6 +38,8 @@ function Layout({ children }: { children: React.ReactNode }) {
   // e some "Vendas/NF-e" do menu; NORTE-LAB ativa NF-e e ganha esses itens.
   const emiteNfse = empresaAtual?.emite_nfse !== false
   const emiteNfe = empresaAtual?.emite_nfe === true
+  const usaStripe = empresaAtual?.usa_stripe === true
+  const usaTicto = empresaAtual?.usa_ticto === true
 
   const nav = [
     { to: '/empresas', label: 'Empresas', icon: Building2, show: true },
@@ -47,8 +49,8 @@ function Layout({ children }: { children: React.ReactNode }) {
     { to: '/fiscal', label: 'Fiscal', icon: Settings2, show: true },
     { to: '/nfse', label: 'NFS-e', icon: FileSignature, show: emiteNfse },
     { to: '/nfe', label: 'NF-e / NFC-e', icon: FileText, show: emiteNfe },
-    { to: '/integracoes/ticto', label: 'Integração Ticto', icon: Plug, show: emiteNfse },
-    { to: '/integracoes/stripe', label: 'Integração Stripe', icon: CreditCard, show: emiteNfse },
+    { to: '/integracoes/ticto', label: 'Integração Ticto', icon: Plug, show: usaTicto },
+    { to: '/integracoes/stripe', label: 'Integração Stripe', icon: CreditCard, show: usaStripe },
     { to: '/notas', label: 'Notas (legado)', icon: FileText, show: true },
     { to: '/darfs', label: 'DARF', icon: ReceiptText, show: true },
   ].filter((item) => item.show)

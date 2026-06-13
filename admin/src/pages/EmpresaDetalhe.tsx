@@ -63,6 +63,8 @@ interface Empresa {
   nfse_codigo_tributario_municipal_padrao?: string | null
   emite_nfse?: boolean | null
   emite_nfe?: boolean | null
+  usa_stripe?: boolean | null
+  usa_ticto?: boolean | null
 }
 
 interface CertStatus {
@@ -136,6 +138,8 @@ const emptyForm = {
   incentivo_fiscal: false,
   emite_nfse: true,
   emite_nfe: false,
+  usa_stripe: false,
+  usa_ticto: false,
 }
 
 function onlyDigits(value: string) {
@@ -195,6 +199,8 @@ function toForm(empresa: Empresa) {
     // Default: emite_nfse vem como true se DB ainda não tem o campo, emite_nfe como false
     emite_nfse: empresa.emite_nfse === null || empresa.emite_nfse === undefined ? true : Boolean(empresa.emite_nfse),
     emite_nfe: Boolean(empresa.emite_nfe),
+    usa_stripe: Boolean(empresa.usa_stripe),
+    usa_ticto: Boolean(empresa.usa_ticto),
   }
 }
 
@@ -462,6 +468,29 @@ export default function EmpresaDetalhe() {
               />
               <span><strong>NF-e / NFC-e</strong> <span className="text-muted">— mercadoria (ICMS, NCM/CFOP)</span></span>
             </label>
+          </div>
+          <div className="mt-3 border-t border-black/[0.06] pt-3">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-dark">Integrações de pagamento</div>
+            <div className="flex flex-wrap gap-4">
+              <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-black/[0.08] bg-white px-3 py-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={form.usa_stripe}
+                  onChange={(event) => setForm((current) => ({ ...current, usa_stripe: event.target.checked }))}
+                  className="h-4 w-4"
+                />
+                <span><strong>Stripe</strong> <span className="text-muted">— pagamentos online / SaaS</span></span>
+              </label>
+              <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-black/[0.08] bg-white px-3 py-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={form.usa_ticto}
+                  onChange={(event) => setForm((current) => ({ ...current, usa_ticto: event.target.checked }))}
+                  className="h-4 w-4"
+                />
+                <span><strong>Ticto</strong> <span className="text-muted">— marketplace digital</span></span>
+              </label>
+            </div>
           </div>
         </div>
 

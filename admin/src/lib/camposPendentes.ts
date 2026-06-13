@@ -32,6 +32,9 @@ export interface EmpresaCampos {
   // false (só ativa pra quem vende mercadoria e tem CSC/SEFAZ configurados).
   emite_nfse?: boolean | null
   emite_nfe?: boolean | null
+  // Integrações de pagamento online — independentes do tipo de nota emitida.
+  usa_stripe?: boolean | null
+  usa_ticto?: boolean | null
 }
 
 export interface CampoPendente {

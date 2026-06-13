@@ -54,6 +54,8 @@ const empresaSchema = z.object({
   // Flags que controlam o que a sidebar mostra pra empresa (workspace ativo).
   emite_nfse: z.boolean().optional(),
   emite_nfe: z.boolean().optional(),
+  usa_stripe: z.boolean().optional(),
+  usa_ticto: z.boolean().optional(),
 })
 
 function cleanDoc(value?: string | null) {
