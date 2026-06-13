@@ -693,9 +693,23 @@ function EmitirModal({
     return s + valorUnit * (it.quantidade || 0) - (it.valor_desconto || 0)
   }, 0)
 
+  // Um item só é válido se tem produto selecionado, quantidade > 0 e valor > 0.
+  // `itens` sempre começa com 1 linha vazia, então checar `itens.length` não
+  // basta — precisamos garantir que ao menos uma linha esteja preenchida.
+  const itensPreenchidos = itens.filter((it) => {
+    const p = produtos.find((x) => x.id === it.produto_id)
+    const valorUnit = it.valor_unitario ?? Number(p?.valor_unitario || 0)
+    return it.produto_id && (it.quantidade || 0) > 0 && valorUnit > 0
+  })
+  const podeEmitir = Boolean(empresaId && naturezaId) && itensPreenchidos.length > 0 && valorTotal > 0
+
   async function handleEmitir() {
-    if (!empresaId || !naturezaId || itens.length === 0) {
-      toast.error('Preencha empresa, natureza e ao menos um item')
+    if (!empresaId || !naturezaId) {
+      toast.error('Preencha empresa e natureza de operação')
+      return
+    }
+    if (itensPreenchidos.length === 0) {
+      toast.error('Selecione ao menos um produto com valor maior que zero')
       return
     }
     if ((tipoDocumento === 'devolucao' || tipoDocumento === 'complementar' || tipoDocumento === 'ajuste') && !chaveReferenciada.trim()) {
@@ -717,7 +731,7 @@ function EmitirModal({
           cliente_id: clienteId || null,
           tipo_documento: tipoDocumento,
           chave_acesso_referenciada: chaveReferenciada.trim() || null,
-          itens: itens.map((it) => ({
+          itens: itensPreenchidos.map((it) => ({
             produto_id: it.produto_id,
             quantidade: it.quantidade,
             valor_unitario: it.valor_unitario,
@@ -1179,9 +1193,10 @@ function EmitirModal({
             Cancelar
           </button>
           <button
-            disabled={emitindo}
+            disabled={emitindo || !podeEmitir}
             onClick={handleEmitir}
-            className="rounded bg-accent px-4 py-2 text-sm text-white hover:bg-accent/90 disabled:opacity-50"
+            title={!podeEmitir ? 'Selecione um produto com valor maior que zero' : undefined}
+            className="rounded bg-accent px-4 py-2 text-sm text-white hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {emitindo ? 'Emitindo…' : 'Emitir'}
           </button>
