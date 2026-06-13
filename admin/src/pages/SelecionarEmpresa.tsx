@@ -17,14 +17,16 @@ export default function SelecionarEmpresa() {
   const navigate = useNavigate()
   const { empresas, setEmpresaId, loading } = useEmpresaAtual()
 
-  // Se o usuário acessar /selecionar-empresa direto sem nenhuma empresa
-  // cadastrada, manda pra /empresas pra criar a primeira. Caso contrário
-  // a tela ficaria vazia.
+  // Se só tem 1 empresa → auto-seleciona e pula a splash (conta restrita)
   useEffect(() => {
+    if (!loading && empresas.length === 1) {
+      setEmpresaId(empresas[0].id)
+      navigate('/nfse', { replace: true })
+    }
     if (!loading && empresas.length === 0) {
       navigate('/empresas', { replace: true })
     }
-  }, [loading, empresas.length, navigate])
+  }, [loading, empresas, setEmpresaId, navigate])
 
   function escolher(empresa: EmpresaResumo) {
     setEmpresaId(empresa.id)

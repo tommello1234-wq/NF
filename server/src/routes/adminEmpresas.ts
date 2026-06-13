@@ -75,8 +75,25 @@ function cleanEmptyStrings<T extends Record<string, unknown>>(payload: T) {
 export async function adminEmpresasRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authAdmin)
 
-  /** GET /admin/empresas — lista todas */
-  app.get('/empresas', async () => {
+  /** GET /admin/empresas — lista empresas visíveis pro usuário logado.
+   *  Se o usuário tem linhas em usuario_empresas → só essas.
+   *  Se não tem nenhuma → vê todas (superadmin / conta antiga). */
+  app.get('/empresas', async (req) => {
+    const userId = req.adminUserId!
+    const { data: acessos } = await supabase
+      .from('usuario_empresas')
+      .select('empresa_id')
+      .eq('user_id', userId)
+    if (acessos && acessos.length > 0) {
+      const ids = acessos.map((a) => a.empresa_id)
+      const { data } = await supabase
+        .from('empresas')
+        .select('*')
+        .in('id', ids)
+        .order('nome')
+      return data || []
+    }
+    // Sem restrição — superadmin vê tudo
     const { data } = await supabase
       .from('empresas')
       .select('*')
