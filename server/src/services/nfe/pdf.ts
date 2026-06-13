@@ -1,8 +1,10 @@
 /**
- * Conversor HTML → PDF usando puppeteer-core + Chrome do sistema.
+ * Conversor HTML → PDF usando puppeteer-core.
  *
- * Não baixa Chromium próprio (que seria ~170MB). Usa o Chrome/Edge já
- * instalado no PC do desenvolvedor/servidor.
+ * Dois modos, escolhidos automaticamente:
+ *  - Serverless (Vercel/AWS Lambda): usa @sparticuz/chromium — um Chromium
+ *    empacotado feito pra rodar em ambiente sem Chrome instalado.
+ *  - Local (dev): usa o Chrome/Edge já instalado no PC, sem baixar 170MB.
  *
  * Pra DANFE NF-e (A4): formato A4 padrão.
  * Pra DANFE NFC-e (bobina 80mm): largura fixa 80mm + altura auto.
@@ -26,9 +28,18 @@ const CHROME_PATHS = [
   '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
 ]
 
+/** True quando rodando em Vercel/AWS Lambda (sem Chrome no sistema). */
+function isServerless(): boolean {
+  return Boolean(
+    process.env.VERCEL ||
+      process.env.AWS_LAMBDA_FUNCTION_NAME ||
+      process.env.AWS_EXECUTION_ENV,
+  )
+}
+
 let chromePathCache: string | null | undefined = undefined
 
-async function findChrome(): Promise<string | null> {
+async function findChromeLocal(): Promise<string | null> {
   if (chromePathCache !== undefined) return chromePathCache
   const fromEnv = process.env.PUPPETEER_EXECUTABLE_PATH
   if (fromEnv) {
@@ -49,24 +60,54 @@ async function findChrome(): Promise<string | null> {
   return null
 }
 
+/** Resolve a configuração de launch conforme o ambiente. */
+async function resolveLaunchConfig(): Promise<{
+  executablePath: string
+  args: string[]
+  headless: boolean | 'shell'
+}> {
+  if (isServerless()) {
+    // Import dinâmico pra não carregar o pacote (~70MB) em dev/local.
+    const mod = await import('@sparticuz/chromium')
+    const chromium = (mod as { default?: unknown }).default ?? mod
+    const c = chromium as {
+      args: string[]
+      headless: boolean | 'shell'
+      executablePath: () => Promise<string>
+    }
+    return {
+      executablePath: await c.executablePath(),
+      args: c.args,
+      headless: c.headless,
+    }
+  }
+
+  const local = await findChromeLocal()
+  if (!local) {
+    throw new Error(
+      'Chrome/Edge não encontrado no sistema. Instale Google Chrome ou Microsoft Edge, ou defina PUPPETEER_EXECUTABLE_PATH no .env.',
+    )
+  }
+  return {
+    executablePath: local,
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    headless: true,
+  }
+}
+
 export interface HtmlToPdfOptions {
   /** 'a4' (default) ou 'bobina-80mm' pra DANFE NFC-e */
   formato?: 'a4' | 'bobina-80mm'
 }
 
-/** Renderiza HTML em PDF. Throws se Chrome não encontrado. */
+/** Renderiza HTML em PDF. Throws se nenhum Chromium estiver disponível. */
 export async function htmlToPdf(html: string, opts: HtmlToPdfOptions = {}): Promise<Buffer> {
-  const chromePath = await findChrome()
-  if (!chromePath) {
-    throw new Error(
-      'Chrome/Edge não encontrado no sistema. Instale Google Chrome ou Microsoft Edge, ou defina PUPPETEER_EXECUTABLE_PATH no .env.',
-    )
-  }
+  const cfg = await resolveLaunchConfig()
 
   const browser = await puppeteer.launch({
-    executablePath: chromePath,
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    executablePath: cfg.executablePath,
+    headless: cfg.headless,
+    args: cfg.args,
   })
   try {
     const page = await browser.newPage()
@@ -91,5 +132,6 @@ export async function htmlToPdf(html: string, opts: HtmlToPdfOptions = {}): Prom
 }
 
 export async function chromeDisponivel(): Promise<boolean> {
-  return (await findChrome()) !== null
+  if (isServerless()) return true
+  return (await findChromeLocal()) !== null
 }
