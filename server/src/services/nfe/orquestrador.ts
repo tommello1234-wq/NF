@@ -54,7 +54,8 @@ export async function emitirNfe(input: NfeInput): Promise<NfeResult> {
   const natureza = await carregarNatureza(input.naturezaOperacaoId)
   const cert = await carregarCertificado(input.empresaId)
   if (!cert) throw new Error('Certificado A1 não encontrado pra empresa')
-  const itensXml = await carregarItens(input.itens)
+  const crt = (empresa.crt as 1 | 2 | 3 | 4) || 1
+  const itensXml = await carregarItens(input.itens, crt)
   // Regra SEFAZ: em homologação (ambiente=2) a descrição do PRIMEIRO item DEVE
   // ser literalmente esse texto. Caso contrário cStat 373.
   if (ambiente === 2 && itensXml[0]) {
@@ -105,7 +106,7 @@ export async function emitirNfe(input: NfeInput): Promise<NfeResult> {
       nome: empresa.razao_social,
       ie: empresa.ie,
       im: empresa.im || undefined,
-      crt: (empresa.crt as 1 | 2 | 3 | 4) || 1,
+      crt,
       endereco: {
         logradouro: empresa.endereco_logradouro || '',
         numero: empresa.endereco_numero || 'S/N',
@@ -118,7 +119,7 @@ export async function emitirNfe(input: NfeInput): Promise<NfeResult> {
     },
     dest,
     itens: itensXml,
-    total: calcularTotais(itensXml, input),
+    total: calcularTotais(itensXml, input, crt),
     transp: (() => {
       // Frete completo (Fase 5) ou legado
       const f = input.frete
@@ -377,7 +378,10 @@ async function carregarNatureza(naturezaId: string) {
   return data
 }
 
-async function carregarItens(itens: NfeInput['itens']): Promise<ItemXml[]> {
+async function carregarItens(
+  itens: NfeInput['itens'],
+  crt: 1 | 2 | 3 | 4 = 1,
+): Promise<ItemXml[]> {
   const ids = itens.map((i) => i.produtoId)
   const { data: produtos, error } = await supabase.from('produtos').select('*').in('id', ids)
   if (error || !produtos) throw new Error(`Erro ao carregar produtos: ${error?.message}`)
@@ -403,9 +407,15 @@ async function carregarItens(itens: NfeInput['itens']): Promise<ItemXml[]> {
       valorTotal: +(valorUnit * quantidade - desconto).toFixed(2),
       gtin: p.gtin || 'SEM GTIN',
       origem: p.origem ?? 0,
-      // Pra Regime Normal (CRT=3), usa cst_icms (2 dígitos: 00, 10, 20...).
-      // Pra Simples (CRT=1/4), usa cst_csosn ou csosn (3 dígitos: 102, 500...).
-      cstCsosn: p.cst_icms || p.cst_csosn || p.csosn || '102',
+      // A escolha do código é DITADA PELO REGIME, não pela ordem dos campos:
+      //  - Simples (CRT 1/4): CSOSN de 3 dígitos (102, 500…) → cst_csosn/csosn
+      //  - Regime Normal (CRT 3): CST de 2 dígitos (00, 10, 20…) → cst_icms
+      // Selecionar por regime evita um cst_icms herdado "vazar" pro grupo CSOSN
+      // (era o bug que destacava ICMS numa empresa do Simples).
+      cstCsosn:
+        crt === 1 || crt === 4
+          ? p.cst_csosn || p.csosn || '102'
+          : p.cst_icms || '00',
       cstPis: p.cst_pis || '49',
       cstCofins: p.cst_cofins || '49',
       cstIpi: p.cst_ipi || undefined,
@@ -502,28 +512,36 @@ async function resolverDestinatario(input: NfeInput) {
   }
 }
 
-function calcularTotais(itens: ItemXml[], _input: NfeInput) {
+function calcularTotais(itens: ItemXml[], _input: NfeInput, crt: 1 | 2 | 3 | 4 = 1) {
   const valorProdutos = itens.reduce((s, i) => s + i.valorTotal, 0)
   const valorDesconto = itens.reduce((s, i) => s + (i.valorDesconto || 0), 0)
   const valorIpi = itens.reduce((s, i) => {
     if (!i.aliquotaIpi) return s
     return s + (i.valorTotal * (i.aliquotaIpi / 100))
   }, 0)
+  // No Simples Nacional o ICMS próprio NÃO é destacado na nota (ele já está no
+  // DAS). Os grupos CSOSN não carregam vICMS/vBC, então os totais devem ser 0 —
+  // senão o XML fica inconsistente (cStat 531) ou cobra ICMS indevido.
+  const isSimples = crt === 1 || crt === 4
   // ICMS total = soma do (valorTotal × aliquotaIcms / 100) de cada item.
   // Pra CST 00/10/20 isso precisa bater com o somatório do XML — senão cStat 531.
-  const valorIcmsTotal = itens.reduce((s, i) => {
-    if (!i.aliquotaIcms) return s
-    // CST 40/41/50/60 não destacam ICMS — não somar.
-    const cst = i.cstCsosn
-    if (['40', '41', '50', '60'].includes(cst)) return s
-    return s + (i.valorTotal * (i.aliquotaIcms / 100))
-  }, 0)
-  const valorBaseIcms = itens.reduce((s, i) => {
-    if (!i.aliquotaIcms) return s
-    const cst = i.cstCsosn
-    if (['40', '41', '50', '60'].includes(cst)) return s
-    return s + i.valorTotal
-  }, 0)
+  const valorIcmsTotal = isSimples
+    ? 0
+    : itens.reduce((s, i) => {
+        if (!i.aliquotaIcms) return s
+        // CST 40/41/50/60 não destacam ICMS — não somar.
+        const cst = i.cstCsosn
+        if (['40', '41', '50', '60'].includes(cst)) return s
+        return s + (i.valorTotal * (i.aliquotaIcms / 100))
+      }, 0)
+  const valorBaseIcms = isSimples
+    ? 0
+    : itens.reduce((s, i) => {
+        if (!i.aliquotaIcms) return s
+        const cst = i.cstCsosn
+        if (['40', '41', '50', '60'].includes(cst)) return s
+        return s + i.valorTotal
+      }, 0)
   // PIS / COFINS: soma só dos itens com CST tributável (PISAliq, COFINSAliq).
   // Pra CST 04, 06-09, 49 (NT/Outras), o item não soma.
   const cstsTributados = ['01', '02']
