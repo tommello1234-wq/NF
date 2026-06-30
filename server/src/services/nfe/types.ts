@@ -43,7 +43,7 @@ export const WS_PATH = {
   autorizacao: '/NfeAutorizacao/NFeAutorizacao4.asmx',
   retAutorizacao: '/NfeRetAutorizacao/NFeRetAutorizacao4.asmx',
   inutilizacao: '/NfeInutilizacao/NFeInutilizacao4.asmx',
-  consultaProtocolo: '/NfeConsulta/NFeConsultaProtocolo4.asmx',
+  consultaProtocolo: '/NfeConsulta/NfeConsulta4.asmx',
   statusServico: '/NfeStatusServico/NFeStatusServico4.asmx',
   recepcaoEvento: '/RecepcaoEvento/NFeRecepcaoEvento4.asmx',
   cadConsultaCadastro: '/CadConsultaCadastro/CadConsultaCadastro4.asmx',

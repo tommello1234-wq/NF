@@ -213,15 +213,13 @@ export async function consultarStatusServico(cfg: TransmissaoConfig): Promise<So
 }
 
 /** Consulta de nota já emitida pela chave de acesso.
- *  O host de consulta na SVRS é o de NF-e (modelo 55) mesmo quando consultando
- *  uma NFC-e — o host de NFC-e não expõe esse endpoint. */
+ *  Usa o host do PRÓPRIO modelo: NFC-e (65) → host nfce; NF-e (55) → host nfe.
+ *  Endpoint oficial SVRS: /NfeConsulta/NfeConsulta4.asmx (mesmo p/ os dois). */
 export async function consultarProtocolo(
   cfg: TransmissaoConfig,
   chaveAcesso: string,
 ): Promise<SoapResposta> {
-  // Força modelo=55 pro host correto, independente do modelo da nota.
-  const cfgConsulta: TransmissaoConfig = { ...cfg, modelo: 55 }
-  const url = resolverUrl(cfgConsulta, 'consultaProtocolo')
+  const url = resolverUrl(cfg, 'consultaProtocolo')
   const wsdl = 'http://www.portalfiscal.inf.br/nfe/wsdl/NFeConsultaProtocolo4'
 
   const xml =
@@ -231,7 +229,7 @@ export async function consultarProtocolo(
     `<chNFe>${chaveAcesso}</chNFe>` +
     `</consSitNFe>`
 
-  return postSoap(cfgConsulta, url, montarEnvelopeSoap(xml, wsdl), `${wsdl}/nfeConsultaNF`)
+  return postSoap(cfg, url, montarEnvelopeSoap(xml, wsdl), `${wsdl}/nfeConsultaNF`)
 }
 
 /**
