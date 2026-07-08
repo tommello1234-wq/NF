@@ -469,6 +469,7 @@ export default function EmpresaDetalhe() {
               <span><strong>NF-e / NFC-e</strong> <span className="text-muted">— mercadoria (ICMS, NCM/CFOP)</span></span>
             </label>
           </div>
+          {(form.emite_nfse || form.usa_stripe || form.usa_ticto) && (
           <div className="mt-3 border-t border-black/[0.06] pt-3">
             <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-dark">Integrações de pagamento</div>
             <div className="flex flex-wrap gap-4">
@@ -492,6 +493,7 @@ export default function EmpresaDetalhe() {
               </label>
             </div>
           </div>
+          )}
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
