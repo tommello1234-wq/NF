@@ -38,6 +38,8 @@ export interface MappedEmissaoStripe {
   stripePriceId: string       // pra mapear pro serviço cadastrado
   invoiceId: string
   subscriptionId?: string
+  /** Data do pagamento (competência da NFS-e = mês da venda) */
+  dataCompetencia?: Date
 }
 
 export function mapearStripeInvoiceParaEmissao(
@@ -91,6 +93,12 @@ export function mapearStripeInvoiceParaEmissao(
     invoice.lines?.data?.[0]?.description?.trim() ||
     undefined
 
+  // Competência = data do pagamento (paid_at) → fallback pra created. Assim a
+  // NFS-e sai no mês da venda, não no dia do processamento/reprocessamento.
+  const tsPagamento = invoice.status_transitions?.paid_at ?? invoice.created
+  const dataCompetencia =
+    typeof tsPagamento === 'number' && tsPagamento > 0 ? new Date(tsPagamento * 1000) : undefined
+
   return {
     valorServicos,
     tomador: {
@@ -103,5 +111,6 @@ export function mapearStripeInvoiceParaEmissao(
     stripePriceId,
     invoiceId,
     subscriptionId,
+    dataCompetencia,
   }
 }

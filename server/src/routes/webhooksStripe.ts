@@ -206,6 +206,7 @@ export async function webhooksStripeRoutes(app: FastifyInstance) {
           tomadorOverride: mapped.tomador,
           valorServicos: valorFinal,
           descricao: mapped.descricao,
+          dataCompetencia: mapped.dataCompetencia,
         })
         await supabase
           .from('webhook_events')

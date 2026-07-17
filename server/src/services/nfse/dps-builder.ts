@@ -41,7 +41,7 @@ export function buildDpsXml(input: DpsInput): { xml: string; idDps: string } {
   }
 
   const dhEmi = isoUtc(input.dataEmissao)
-  const dCompet = ymd(input.dataCompetencia)
+  const dCompet = ymdBrasilia(input.dataCompetencia)
   const verAplic = (input.versaoAplicativo || 'NFSE-API-1.0').slice(0, 20)
   const localPrest = input.servico.localPrestacaoCodigoMunicipio || cMunEmi
 
@@ -92,19 +92,25 @@ export function buildDpsXml(input: DpsInput): { xml: string; idDps: string } {
   // === valores ===
   const valores = inf.ele('valores')
   valores.ele('vServPrest').ele('vServ').txt(money(input.valores.valorServicos))
+  const opSimpNac = input.prestador.regimeTributario.opSimpNac
   const trib = valores.ele('trib')
   const tribMun = trib.ele('tribMun')
   tribMun.ele('tribISSQN').txt('1') // 1=Operação tributável
   // TSTipoRetISSQN: 1=Não Retido, 2=Retido pelo Tomador, 3=Retido pelo Intermediário
   tribMun.ele('tpRetISSQN').txt(input.valores.issRetido ? '2' : '1')
-  tribMun.ele('pAliq').txt(money(input.valores.aliquotaIss))
+  // Regra E0625: prestador ME/EPP do Simples (opSimpNac 2/3) SEM retenção NÃO
+  // pode informar alíquota — o ISS já vai no DAS (pTotTribSN abaixo). Só emite
+  // pAliq quando há retenção ou quando é regime normal (opSimpNac=1).
+  const simplesNaoRetido = (opSimpNac === 2 || opSimpNac === 3) && !input.valores.issRetido
+  if (!simplesNaoRetido) {
+    tribMun.ele('pAliq').txt(money(input.valores.aliquotaIss))
+  }
 
   // SEFIN regra E0712: ME/EPP (opSimpNac=2 ou 3) NÃO pode usar
   // <indTotTrib>. Tem que informar <pTotTribSN> (percentual aproximado
   // total dos tributos pagos via DAS).
   // Default: 6% (Anexo III faixa 1 do Simples — serviços). Confirmar
   // com a contadora a alíquota efetiva real e ajustar.
-  const opSimpNac = input.prestador.regimeTributario.opSimpNac
   const totTrib = trib.ele('totTrib')
   if (opSimpNac === 2 || opSimpNac === 3) {
     const pSN = (input.valores as { pTotTribSN?: number }).pTotTribSN ?? 6.00
@@ -161,9 +167,14 @@ function isoUtc(d: Date): string {
   return `${Y}-${M}-${D}T${h}:${m}:${s}-03:00`
 }
 
-function ymd(d: Date): string {
+function ymdBrasilia(d: Date): string {
+  // Mesmo ajuste do isoUtc (Brasília -03:00, -60s de folga) pra a data de
+  // competência cair no MESMO dia que o dhEmi quando forem o mesmo instante.
+  // Na Vercel (UTC), usar getters locais fazia a competência "pular" pro dia
+  // seguinte à noite → E0015 (competência posterior à emissão).
   const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+  const adjusted = new Date(d.getTime() - 60_000 - 180 * 60_000)
+  return `${adjusted.getUTCFullYear()}-${pad(adjusted.getUTCMonth() + 1)}-${pad(adjusted.getUTCDate())}`
 }
 
 function money(n: number): string {

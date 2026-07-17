@@ -11,6 +11,7 @@
 
 import { supabase } from '../supabase.js'
 import { carregarCertificado } from '../certificado.js'
+import { resolverCep } from './cep.js'
 import {
   buildDpsXml,
   buildEventoCancelamentoXml,
@@ -117,12 +118,15 @@ export async function emitirNfse(input: EmitirNfseInput): Promise<EmitirNfseResu
   const numeroDps = await reservarProximoNumeroDps(input.empresaId, empresa.proximo_numero_dps || 1)
 
   // 6. Monta DPS
+  // Mesmo instante pros dois quando não vem competência explícita — assim
+  // dCompet e dhEmi caem no mesmo dia (o builder normaliza ambos pra Brasília).
+  const agora = new Date()
   const dpsInput: DpsInput = {
     ambiente,
     serie: serieDps,
     numero: numeroDps,
-    dataEmissao: new Date(),
-    dataCompetencia: input.dataCompetencia || new Date(),
+    dataEmissao: agora,
+    dataCompetencia: input.dataCompetencia || agora,
     codigoMunicipioEmissor: cMunEmi,
     versaoAplicativo: 'NFE-API-1.0',
     prestador: {
@@ -230,20 +234,14 @@ export async function emitirNfse(input: EmitirNfseInput): Promise<EmitirNfseResu
 
 // === helpers ===
 
-async function resolveTomador(input: EmitirNfseInput, cMunFallback: string) {
+async function resolveTomador(input: EmitirNfseInput, _cMunFallback: string) {
   if (input.tomadorOverride) {
-    const enderecoOverride = input.tomadorOverride.endereco
     return {
       cpf: input.tomadorOverride.cpf,
       cnpj: input.tomadorOverride.cnpj,
       nome: input.tomadorOverride.nome,
       email: input.tomadorOverride.email,
-      endereco: enderecoOverride
-        ? {
-            ...enderecoOverride,
-            codigoMunicipio: enderecoOverride.codigoMunicipio || cMunFallback,
-          }
-        : undefined,
+      endereco: await montarEnderecoPorCep(input.tomadorOverride.endereco),
     }
   }
   if (!input.clienteId) throw new Error('clienteId ou tomadorOverride é obrigatório')
@@ -257,27 +255,54 @@ async function resolveTomador(input: EmitirNfseInput, cMunFallback: string) {
   const cpfCnpj = (cli.cpf_cnpj || '').replace(/\D/g, '')
   const isCpf = cpfCnpj.length === 11
 
-  // Endereço é obrigatório no DPS quando ISS é retido pelo tomador, e o
-  // SEFIN também rejeita quando vazio em outros cenários (E0237). Por
-  // segurança, sempre montamos um endereço — se o cliente foi cadastrado
-  // sem endereço, usamos um fallback no município emissor.
-  const cep = (cli.endereco_cep || '').replace(/\D/g, '')
-  const endereco = {
-    logradouro: cli.endereco_logradouro || 'Nao informado',
-    numero: cli.endereco_numero || 'S/N',
-    bairro: cli.endereco_bairro || 'Centro',
-    codigoMunicipio:
-      (cli.endereco_codigo_ibge && /^\d{7}$/.test(cli.endereco_codigo_ibge))
-        ? cli.endereco_codigo_ibge
-        : cMunFallback,
-    cep: cep && cep.length === 8 ? cep : '00000000',
-  }
-
   return {
     ...(isCpf ? { cpf: cpfCnpj } : { cnpj: cpfCnpj }),
     nome: cli.nome,
     email: cli.email || undefined,
-    endereco,
+    endereco: await montarEnderecoPorCep({
+      logradouro: cli.endereco_logradouro,
+      numero: cli.endereco_numero,
+      bairro: cli.endereco_bairro,
+      cep: cli.endereco_cep,
+      complemento: cli.endereco_complemento,
+    }),
+  }
+}
+
+/**
+ * Monta o endereço do tomador DERIVANDO o município (cMun) do CEP via ViaCEP,
+ * garantindo que cMun e CEP batam — senão a DPS rejeita com E0240 ("CEP não
+ * pertence ao município"). Se não houver CEP válido ou o ViaCEP não resolver,
+ * retorna `undefined` e o endereço é OMITIDO na DPS (válido pra tomador pessoa
+ * física sem ISS retido) — melhor que mandar CEP/município inconsistente.
+ */
+async function montarEnderecoPorCep(raw?: {
+  logradouro?: string | null
+  numero?: string | null
+  bairro?: string | null
+  cep?: string | null
+  complemento?: string | null
+}): Promise<
+  | { logradouro: string; numero: string; bairro: string; codigoMunicipio: string; cep: string; complemento?: string }
+  | undefined
+> {
+  if (!raw) return undefined
+  const cep = (raw.cep || '').replace(/\D/g, '')
+  if (cep.length !== 8) return undefined
+  const info = await resolverCep(cep)
+  if (!info?.ibge) return undefined // CEP inválido/ViaCEP indisponível → omite endereço
+  // Prefere o dado do cadastro; se for placeholder ou vazio, usa o do ViaCEP.
+  const semPlaceholder = (v: string | null | undefined, placeholders: string[]) => {
+    const t = (v || '').trim()
+    return t && !placeholders.includes(t) ? t : ''
+  }
+  return {
+    logradouro: semPlaceholder(raw.logradouro, ['Nao informado']) || info.logradouro || 'Nao informado',
+    numero: (raw.numero || '').trim() || 'S/N',
+    bairro: semPlaceholder(raw.bairro, ['Centro']) || info.bairro || 'Centro',
+    codigoMunicipio: info.ibge,
+    cep,
+    complemento: raw.complemento || undefined,
   }
 }
 

@@ -48,6 +48,10 @@ export interface StripeInvoiceLike {
   id?: string
   amount_paid?: number
   description?: string | null
+  // Datas em Unix timestamp (segundos). Usadas como competência da NFS-e
+  // (mês da venda). paid_at = quando a invoice foi paga; created = criação.
+  created?: number
+  status_transitions?: { paid_at?: number | null } | null
   // Em invoice o campo customer normalmente é só uma string com o id ("cus_...")
   // mas algumas versões da API expandem pra objeto. Aceita os dois.
   customer?: string | { id?: string } | null
