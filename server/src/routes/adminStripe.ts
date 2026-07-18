@@ -3,12 +3,7 @@ import { z } from 'zod'
 import { supabase } from '../services/supabase.js'
 import { authAdmin } from '../middleware/authAdmin.js'
 import { encryptSecret } from '../services/crypto-utils.js'
-import { emitirNfse } from '../services/nfse/orquestrador.js'
-import { mapearStripeInvoiceParaEmissao } from '../services/webhooks/stripe-mapper.js'
-import {
-  extrairCustomerId,
-  type StripeInvoiceLike,
-} from '../services/webhooks/stripe-types.js'
+import { reemitirEventoStripe } from '../services/webhooks/stripe-reprocess.js'
 
 const mapeamentoSchema = z.object({
   empresa_id: z.string().uuid(),
@@ -179,140 +174,22 @@ export async function adminStripeRoutes(app: FastifyInstance) {
    *   - Mapeamento price_id criado depois
    */
   app.post<{ Params: { id: string } }>('/webhook-events/:id/reprocessar', async (req, reply) => {
-    const { data: evento } = await supabase
-      .from('webhook_events')
-      .select('id, provider, empresa_id, event_type, payload, status, nota_fiscal_id')
-      .eq('id', req.params.id)
-      .maybeSingle()
-    if (!evento) return reply.status(404).send({ error: 'Evento não encontrado' })
-    if (evento.provider !== 'stripe') {
-      return reply.status(400).send({ error: 'Reprocessar disponível só pra eventos Stripe' })
+    const r = await reemitirEventoStripe(req.params.id)
+    if (r.ok) {
+      return reply.status(200).send({ ok: true, nota_id: r.notaId, status: r.status })
     }
-    if (evento.status === 'processado' && evento.nota_fiscal_id) {
-      return reply.status(400).send({ error: 'Evento já processado com sucesso (nota emitida)' })
+    const msg = r.erro || 'Falha ao reprocessar'
+    if (msg.includes('não encontrada') || msg.includes('não encontrado')) {
+      return reply.status(404).send({ error: msg })
     }
-    if (evento.event_type !== 'invoice.payment_succeeded') {
-      return reply.status(400).send({
-        error: `Tipo "${evento.event_type}" não aciona emissão — só invoice.payment_succeeded`,
-      })
+    if (
+      msg.includes('só pra eventos Stripe') ||
+      msg.includes('já processado') ||
+      msg.includes('não aciona emissão') ||
+      msg.includes('sem código IBGE')
+    ) {
+      return reply.status(400).send({ error: msg })
     }
-
-    const { data: empresa } = await supabase
-      .from('empresas')
-      .select('id, municipio_emissor_codigo, endereco_codigo_ibge, stripe_produto_default_id')
-      .eq('id', evento.empresa_id)
-      .maybeSingle()
-    if (!empresa) return reply.status(404).send({ error: 'Empresa do evento não encontrada' })
-
-    const cMunFallback = String(
-      empresa.municipio_emissor_codigo || empresa.endereco_codigo_ibge || ''
-    )
-    if (cMunFallback.length !== 7) {
-      return reply.status(400).send({ error: 'Empresa sem código IBGE de município emissor' })
-    }
-
-    // O payload salvo é o event inteiro — invoice fica em data.object
-    const payload = (evento.payload as unknown as { data?: { object?: unknown } }) || {}
-    const invoice = (payload.data?.object || {}) as StripeInvoiceLike
-
-    let mapped
-    try {
-      mapped = mapearStripeInvoiceParaEmissao(invoice, cMunFallback)
-    } catch (e) {
-      const msg = (e as Error).message
-      // Mesmo fallback que o webhook em runtime: busca CPF guardado da
-      // checkout.session.completed em stripe_customer_doc antes de desistir.
-      if (msg.includes('CPF/CNPJ')) {
-        const customerId = extrairCustomerId(invoice)
-        if (customerId) {
-          const { data: doc } = await supabase
-            .from('stripe_customer_doc')
-            .select('cpf, cnpj, nome, email')
-            .eq('empresa_id', evento.empresa_id)
-            .eq('stripe_customer_id', customerId)
-            .maybeSingle()
-          if (doc && (doc.cpf || doc.cnpj)) {
-            const invoiceComDoc: StripeInvoiceLike = {
-              ...invoice,
-              customer_tax_ids: [
-                ...(invoice.customer_tax_ids || []),
-                doc.cpf
-                  ? { type: 'br_cpf', value: doc.cpf }
-                  : { type: 'br_cnpj', value: doc.cnpj! },
-              ],
-              customer_name: invoice.customer_name || doc.nome || undefined,
-              customer_email: invoice.customer_email || doc.email || undefined,
-            }
-            try {
-              mapped = mapearStripeInvoiceParaEmissao(invoiceComDoc, cMunFallback)
-            } catch (e2) {
-              await marcarEventoErro(evento.id, (e2 as Error).message)
-              return reply.status(200).send({ ok: false, erro: (e2 as Error).message })
-            }
-          }
-        }
-      }
-      if (!mapped) {
-        await marcarEventoErro(evento.id, msg)
-        return reply.status(200).send({ ok: false, erro: msg })
-      }
-    }
-
-    const { data: mapping } = await supabase
-      .from('stripe_mapeamento')
-      .select('produto_id, valor_unitario_override, ativo')
-      .eq('empresa_id', evento.empresa_id)
-      .eq('stripe_price_id', mapped.stripePriceId)
-      .eq('ativo', true)
-      .maybeSingle()
-
-    let produtoId: string | null = mapping?.produto_id ?? null
-    let valorFinal = mapped.valorServicos
-    if (mapping?.valor_unitario_override) {
-      valorFinal = Number(mapping.valor_unitario_override)
-    }
-    if (!produtoId && empresa.stripe_produto_default_id) {
-      produtoId = empresa.stripe_produto_default_id
-    }
-    if (!produtoId) {
-      const msg = `Sem mapeamento Stripe pra price_id=${mapped.stripePriceId} e sem produto default configurado.`
-      await marcarEventoErro(evento.id, msg)
-      return reply.status(200).send({ ok: false, erro: msg })
-    }
-
-    try {
-      const result = await emitirNfse({
-        empresaId: evento.empresa_id,
-        produtoId,
-        tomadorOverride: mapped.tomador,
-        valorServicos: valorFinal,
-        descricao: mapped.descricao,
-        dataCompetencia: mapped.dataCompetencia,
-      })
-      await supabase
-        .from('webhook_events')
-        .update({
-          status: result.status === 'autorizada' ? 'processado' : 'erro',
-          nota_fiscal_id: result.notaId,
-          processado_em: new Date().toISOString(),
-          erro: result.status !== 'autorizada' ? result.erros?.[0]?.descricao : null,
-        })
-        .eq('id', evento.id)
-      return reply.status(200).send({ ok: true, nota_id: result.notaId, status: result.status })
-    } catch (e) {
-      await marcarEventoErro(evento.id, (e as Error).message)
-      return reply.status(200).send({ ok: false, erro: (e as Error).message })
-    }
+    return reply.status(200).send({ ok: false, erro: msg })
   })
-}
-
-async function marcarEventoErro(eventoId: string, mensagem: string) {
-  await supabase
-    .from('webhook_events')
-    .update({
-      status: 'erro',
-      erro: mensagem.slice(0, 1000),
-      processado_em: new Date().toISOString(),
-    })
-    .eq('id', eventoId)
 }

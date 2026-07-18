@@ -4,6 +4,7 @@ import { supabase } from '../services/supabase.js'
 import { decryptSecret } from '../services/crypto-utils.js'
 import { emitirNfse } from '../services/nfse/orquestrador.js'
 import { mapearStripeInvoiceParaEmissao } from '../services/webhooks/stripe-mapper.js'
+import { reemitirPendentesDoCustomer } from '../services/webhooks/stripe-reprocess.js'
 import {
   extrairCpfCnpjDeCheckout,
   extrairCustomerId,
@@ -281,12 +282,24 @@ export async function webhooksStripeRoutes(app: FastifyInstance) {
           processado_em: new Date().toISOString(),
         })
         .eq('id', evento.id)
+
+      // Race de eventos: se a cobrança desse customer JÁ chegou e falhou por
+      // "sem CPF" (invoice processado antes deste checkout gravar o doc),
+      // reemite a NFS-e agora que o CPF está salvo — fecha o race sozinho.
+      let reemitido: { tentadas: number; emitidas: number } | undefined
+      try {
+        reemitido = await reemitirPendentesDoCustomer(empresaId, customerId)
+      } catch (e) {
+        app.log.error({ err: e }, 'Falha na auto-reemissão pós-checkout Stripe')
+      }
+
       return reply.status(200).send({
         ok: true,
         captured: true,
         customer_id: customerId,
         documento: docs.cpf ? `CPF ${docs.cpf}` : `CNPJ ${docs.cnpj}`,
         fonte: docs.fonte,
+        reemitido,
       })
     }
 
