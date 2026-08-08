@@ -15,14 +15,51 @@ import type { NfeInput, Modelo } from '../services/nfe/types.js'
  * produção. Use ambiente=2 (homologação) até confirmar.
  */
 
-const itemSchema = z.object({
-  produto_id: z.string().uuid(),
-  quantidade: z.coerce.number().positive(),
-  valor_unitario: z.coerce.number().positive().optional(),
-  valor_desconto: z.coerce.number().nonnegative().optional(),
+/**
+ * Produto descrito inline — pra ERP externo que é dono do catálogo e não tem
+ * os produtos cadastrados aqui. `descricao` e `ncm` são obrigatórios (a SEFAZ
+ * exige NCM); o resto cai nos mesmos defaults do produto cadastrado.
+ */
+const produtoInlineSchema = z.object({
+  descricao: z.string().min(1).max(120),
+  ncm: z.string().regex(/^\d{8}$/, 'NCM deve ter 8 dígitos'),
+  codigo: z.string().max(60).optional(),
   cfop: z.string().regex(/^\d{4}$/).optional(),
-  info_adicional: z.string().max(500).optional(),
+  cest: z.string().optional(),
+  unidade: z.string().max(6).optional(),
+  unidade_tributavel: z.string().max(6).optional(),
+  gtin: z.string().optional(),
+  origem: z.coerce.number().int().min(0).max(8).optional(),
+  cst_csosn: z.string().optional(),
+  cst_icms: z.string().optional(),
+  aliquota_icms: z.coerce.number().nonnegative().optional(),
+  cst_pis: z.string().optional(),
+  aliquota_pis: z.coerce.number().nonnegative().optional(),
+  cst_cofins: z.string().optional(),
+  aliquota_cofins: z.coerce.number().nonnegative().optional(),
+  cst_ipi: z.string().optional(),
+  aliquota_ipi: z.coerce.number().nonnegative().optional(),
+  peso_liquido: z.coerce.number().nonnegative().optional(),
+  peso_bruto: z.coerce.number().nonnegative().optional(),
+  ex_tipi: z.string().optional(),
 })
+
+const itemSchema = z
+  .object({
+    produto_id: z.string().uuid().optional(),
+    quantidade: z.coerce.number().positive(),
+    valor_unitario: z.coerce.number().positive().optional(),
+    valor_desconto: z.coerce.number().nonnegative().optional(),
+    cfop: z.string().regex(/^\d{4}$/).optional(),
+    info_adicional: z.string().max(500).optional(),
+    produto: produtoInlineSchema.optional(),
+  })
+  .refine((i) => Boolean(i.produto_id) || Boolean(i.produto), {
+    message: 'Informe "produto_id" (produto cadastrado) ou "produto" (dados fiscais inline)',
+  })
+  .refine((i) => Boolean(i.produto_id) || i.valor_unitario != null, {
+    message: 'Item inline exige "valor_unitario"',
+  })
 
 const pagamentoSchema = z.object({
   forma: z.enum([
@@ -57,8 +94,13 @@ const destinatarioOverrideSchema = z.object({
 })
 
 const emitirSchema = z.object({
-  empresa_id: z.string().uuid(),
-  natureza_operacao_id: z.string().uuid(),
+  /**
+   * Opcional: a empresa é derivada da API key. Se enviado, precisa bater com a
+   * dona da chave (senão 403) — a chave nunca emite por outra empresa.
+   */
+  empresa_id: z.string().uuid().optional(),
+  /** Opcional: se omitido, usa a natureza padrão da empresa (ou a única ativa). */
+  natureza_operacao_id: z.string().uuid().optional(),
   cliente_id: z.string().uuid().optional(),
   destinatario: destinatarioOverrideSchema.optional(),
   itens: z.array(itemSchema).min(1),
@@ -84,7 +126,7 @@ export async function nfeRoutes(app: FastifyInstance) {
     if (!parsed.success) {
       return reply.status(400).send({ error: 'Payload inválido', details: parsed.error.flatten() })
     }
-    return emitir(parsed.data, 55, reply)
+    return emitir(parsed.data, 55, reply, req.empresaId!)
   })
 
   /** POST /v1/nfce — emite NFC-e modelo 65 */
@@ -93,7 +135,7 @@ export async function nfeRoutes(app: FastifyInstance) {
     if (!parsed.success) {
       return reply.status(400).send({ error: 'Payload inválido', details: parsed.error.flatten() })
     }
-    return emitir(parsed.data, 65, reply)
+    return emitir(parsed.data, 65, reply, req.empresaId!)
   })
 
   /** POST /v1/nfe/:id/cancelar — cancela uma NF-e/NFC-e autorizada */
@@ -101,6 +143,11 @@ export async function nfeRoutes(app: FastifyInstance) {
     const parsed = cancelarSchema.safeParse(req.body)
     if (!parsed.success) {
       return reply.status(400).send({ error: 'Payload inválido', details: parsed.error.flatten() })
+    }
+    const dona = await notaPertenceA(req.params.id, req.empresaId!)
+    if (dona === 'nao_encontrada') return reply.status(404).send({ error: 'Nota não encontrada' })
+    if (dona === 'outra_empresa') {
+      return reply.status(403).send({ error: 'Nota não pertence à empresa da API key' })
     }
     try {
       const result = await cancelarNota(req.params.id, parsed.data.justificativa)
@@ -115,10 +162,13 @@ export async function nfeRoutes(app: FastifyInstance) {
     try {
       const { data: nota } = await supabase
         .from('notas_fiscais')
-        .select('modelo')
+        .select('modelo, empresa_id')
         .eq('id', req.params.id)
         .maybeSingle()
       if (!nota) return reply.status(404).send({ error: 'Nota não encontrada' })
+      if (nota.empresa_id !== req.empresaId) {
+        return reply.status(403).send({ error: 'Nota não pertence à empresa da API key' })
+      }
       const html =
         Number(nota.modelo) === 65
           ? await gerarDanfeNfceBobina(req.params.id)
@@ -136,9 +186,12 @@ export async function nfeRoutes(app: FastifyInstance) {
     if (!parsed.success) {
       return reply.status(400).send({ error: 'Payload inválido', details: parsed.error.flatten() })
     }
+    if (parsed.data.empresa_id && parsed.data.empresa_id !== req.empresaId) {
+      return reply.status(403).send({ error: 'empresa_id não corresponde à empresa da API key' })
+    }
     try {
       const result = await inutilizarNumeracao({
-        empresaId: parsed.data.empresa_id,
+        empresaId: req.empresaId!,
         modelo: parsed.data.modelo,
         serie: parsed.data.serie,
         numeroInicial: parsed.data.numero_inicial,
@@ -158,7 +211,8 @@ const cancelarSchema = z.object({
 })
 
 const inutilizarSchema = z.object({
-  empresa_id: z.string().uuid(),
+  /** Opcional — derivado da API key. Se enviado, precisa bater (senão 403). */
+  empresa_id: z.string().uuid().optional(),
   modelo: z.union([z.literal(55), z.literal(65)]),
   serie: z.coerce.number().int().min(0).max(999),
   numero_inicial: z.coerce.number().int().positive(),
@@ -167,16 +221,63 @@ const inutilizarSchema = z.object({
   justificativa: z.string().min(15).max(255),
 })
 
+/** Confere se a nota é da empresa dona da API key. */
+async function notaPertenceA(
+  notaId: string,
+  empresaId: string,
+): Promise<'ok' | 'nao_encontrada' | 'outra_empresa'> {
+  const { data } = await supabase
+    .from('notas_fiscais')
+    .select('empresa_id')
+    .eq('id', notaId)
+    .maybeSingle()
+  if (!data) return 'nao_encontrada'
+  return data.empresa_id === empresaId ? 'ok' : 'outra_empresa'
+}
+
+/**
+ * Resolve a natureza de operação quando o cliente não informa: pega a da
+ * própria empresa (a primeira ativa). Assim o ERP externo não precisa saber
+ * uuids internos da API.
+ */
+async function resolverNaturezaPadrao(empresaId: string): Promise<string> {
+  const { data } = await supabase
+    .from('naturezas_operacao')
+    .select('id, nome, ativo')
+    .eq('empresa_id', empresaId)
+    .eq('ativo', true)
+    .order('created_at', { ascending: true })
+  if (!data || data.length === 0) {
+    throw new Error(
+      'Empresa sem natureza de operação cadastrada — cadastre uma (ex: "Venda balcão" CFOP 5102) ou envie natureza_operacao_id',
+    )
+  }
+  // Prefere uma que pareça venda de balcão; senão, a primeira ativa.
+  const venda = data.find((n) => /balc|venda/i.test(String(n.nome || '')))
+  return (venda || data[0]).id
+}
+
 async function emitir(
   body: z.infer<typeof emitirSchema>,
   modelo: Modelo,
   reply: FastifyReply,
+  empresaIdDaChave: string,
 ) {
   try {
+    // A empresa vem SEMPRE da API key. Se o corpo mandar outra, é erro — uma
+    // chave nunca emite usando certificado/numeração de outra empresa.
+    if (body.empresa_id && body.empresa_id !== empresaIdDaChave) {
+      return reply
+        .status(403)
+        .send({ error: 'empresa_id não corresponde à empresa da API key' })
+    }
+    const empresaId = empresaIdDaChave
+    const naturezaId = body.natureza_operacao_id || (await resolverNaturezaPadrao(empresaId))
+
     const input: NfeInput = {
-      empresaId: body.empresa_id,
+      empresaId,
       modelo,
-      naturezaOperacaoId: body.natureza_operacao_id,
+      naturezaOperacaoId: naturezaId,
       clienteId: body.cliente_id,
       destinatarioOverride: body.destinatario
         ? {
@@ -207,6 +308,31 @@ async function emitir(
         valorDesconto: i.valor_desconto,
         cfop: i.cfop,
         infoAdicional: i.info_adicional,
+        produto: i.produto
+          ? {
+              descricao: i.produto.descricao,
+              ncm: i.produto.ncm,
+              codigo: i.produto.codigo,
+              cfop: i.produto.cfop,
+              cest: i.produto.cest,
+              unidade: i.produto.unidade,
+              unidadeTributavel: i.produto.unidade_tributavel,
+              gtin: i.produto.gtin,
+              origem: i.produto.origem,
+              cstCsosn: i.produto.cst_csosn,
+              cstIcms: i.produto.cst_icms,
+              aliquotaIcms: i.produto.aliquota_icms,
+              cstPis: i.produto.cst_pis,
+              aliquotaPis: i.produto.aliquota_pis,
+              cstCofins: i.produto.cst_cofins,
+              aliquotaCofins: i.produto.aliquota_cofins,
+              cstIpi: i.produto.cst_ipi,
+              aliquotaIpi: i.produto.aliquota_ipi,
+              pesoLiquido: i.produto.peso_liquido,
+              pesoBruto: i.produto.peso_bruto,
+              exTipi: i.produto.ex_tipi,
+            }
+          : undefined,
       })),
       pagamento: {
         forma: body.pagamento.forma,

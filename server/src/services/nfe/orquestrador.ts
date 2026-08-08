@@ -382,12 +382,23 @@ async function carregarItens(
   itens: NfeInput['itens'],
   crt: 1 | 2 | 3 | 4 = 1,
 ): Promise<ItemXml[]> {
-  const ids = itens.map((i) => i.produtoId)
-  const { data: produtos, error } = await supabase.from('produtos').select('*').in('id', ids)
-  if (error || !produtos) throw new Error(`Erro ao carregar produtos: ${error?.message}`)
+  // Só busca no banco os itens que referenciam um produto cadastrado aqui.
+  // Itens "inline" (ERP externo dono do catálogo) trazem os dados no payload.
+  const ids = itens.map((i) => i.produtoId).filter((id): id is string => Boolean(id))
+  let produtos: Array<Record<string, unknown>> = []
+  if (ids.length > 0) {
+    const { data, error } = await supabase.from('produtos').select('*').in('id', ids)
+    if (error || !data) throw new Error(`Erro ao carregar produtos: ${error?.message}`)
+    produtos = data
+  }
 
   return itens.map((it, idx) => {
-    const p = produtos.find((x) => x.id === it.produtoId)
+    if (!it.produtoId) {
+      return itemXmlDeInline(it, idx, crt)
+    }
+    const p = produtos.find((x) => (x as { id?: string }).id === it.produtoId) as
+      | Record<string, any>
+      | undefined
     if (!p) throw new Error(`Produto ${it.produtoId} não encontrado`)
     if (!p.ncm) throw new Error(`Produto ${p.descricao} sem NCM cadastrado`)
     const valorUnit = it.valorUnitario ?? Number(p.valor_unitario || 0)
@@ -431,6 +442,64 @@ async function carregarItens(
       produtoId: p.id,
     }
   })
+}
+
+/**
+ * Monta o ItemXml a partir dos dados enviados INLINE no payload (ERP externo
+ * que é dono do catálogo). Aplica exatamente os mesmos defaults do caminho que
+ * lê do banco, pra o XML sair idêntico.
+ */
+function itemXmlDeInline(
+  it: NfeInput['itens'][number],
+  idx: number,
+  crt: 1 | 2 | 3 | 4,
+): ItemXml {
+  const pr = it.produto
+  if (!pr) {
+    throw new Error(
+      `Item ${idx + 1}: informe "produto_id" (produto cadastrado) ou o objeto "produto" com os dados fiscais inline`,
+    )
+  }
+  if (!pr.descricao?.trim()) throw new Error(`Item ${idx + 1}: produto.descricao é obrigatório`)
+  const ncm = (pr.ncm || '').replace(/\D/g, '')
+  if (ncm.length !== 8) {
+    throw new Error(
+      `Item ${idx + 1} (${pr.descricao}): NCM inválido ou ausente — a SEFAZ exige 8 dígitos`,
+    )
+  }
+  const valorUnit = it.valorUnitario ?? 0
+  const quantidade = it.quantidade
+  const desconto = it.valorDesconto || 0
+  return {
+    numero: idx + 1,
+    codigo: pr.codigo || `ITEM${idx + 1}`,
+    descricao: pr.descricao.slice(0, 120),
+    ncm,
+    cest: pr.cest || undefined,
+    cfop: it.cfop || pr.cfop || '5102',
+    unidadeComercial: pr.unidade || 'UN',
+    unidadeTributavel: pr.unidadeTributavel || pr.unidade || 'UN',
+    quantidadeComercial: quantidade,
+    valorUnitario: valorUnit,
+    valorTotal: +(valorUnit * quantidade - desconto).toFixed(2),
+    gtin: pr.gtin || 'SEM GTIN',
+    origem: pr.origem ?? 0,
+    // Mesma regra do caminho do banco: o regime da empresa decide CSOSN vs CST.
+    cstCsosn: crt === 1 || crt === 4 ? pr.cstCsosn || '102' : pr.cstIcms || '00',
+    cstPis: pr.cstPis || '49',
+    cstCofins: pr.cstCofins || '49',
+    cstIpi: pr.cstIpi || undefined,
+    aliquotaIcms: pr.aliquotaIcms != null ? Number(pr.aliquotaIcms) : undefined,
+    aliquotaPis: pr.aliquotaPis != null ? Number(pr.aliquotaPis) : undefined,
+    aliquotaCofins: pr.aliquotaCofins != null ? Number(pr.aliquotaCofins) : undefined,
+    aliquotaIpi: pr.aliquotaIpi != null ? Number(pr.aliquotaIpi) : undefined,
+    pesoLiquido: pr.pesoLiquido != null ? Number(pr.pesoLiquido) : undefined,
+    pesoBruto: pr.pesoBruto != null ? Number(pr.pesoBruto) : undefined,
+    exTipi: pr.exTipi || undefined,
+    valorDesconto: desconto || undefined,
+    infoAdicional: it.infoAdicional || undefined,
+    produtoId: undefined,
+  }
 }
 
 async function persistirItens(
@@ -719,6 +788,8 @@ async function pollRecibo(cfg: TransmissaoConfig, nRec: string): Promise<Record<
 async function darBaixaEstoque(itens: NfeInput['itens']) {
   // Coluna `estoque` vem da migration 014. Se não rodou, vira no-op.
   for (const it of itens) {
+    // Item inline (catálogo mora no ERP externo) não tem produto local pra baixar.
+    if (!it.produtoId) continue
     const { data: p, error: selErr } = await supabase
       .from('produtos')
       .select('estoque')

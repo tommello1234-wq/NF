@@ -111,7 +111,12 @@ export interface NfeInput {
 }
 
 export interface ItemInput {
-  produtoId: string
+  /**
+   * Id de um produto cadastrado NESTA API. Opcional: sistemas externos (ERP)
+   * têm o catálogo no banco deles, então podem mandar os dados fiscais inline
+   * (ver `produto` abaixo). Um dos dois é obrigatório.
+   */
+  produtoId?: string
   quantidade: number
   /** Sobrescreve valor_unitario do produto se fornecido */
   valorUnitario?: number
@@ -121,6 +126,40 @@ export interface ItemInput {
   cfop?: string
   /** Info adicional do item (texto livre, vai pra <infAdProd>) */
   infoAdicional?: string
+  /**
+   * Dados fiscais do produto enviados inline — pra quem não tem o catálogo
+   * cadastrado aqui. `descricao` e `ncm` são obrigatórios; o resto cai nos
+   * mesmos defaults usados pro produto do banco.
+   */
+  produto?: ItemProdutoInline
+}
+
+/** Produto descrito no próprio payload (ERP externo dono do catálogo). */
+export interface ItemProdutoInline {
+  descricao: string
+  ncm: string
+  /** Código interno/SKU do item no sistema de origem */
+  codigo?: string
+  cfop?: string
+  cest?: string
+  unidade?: string
+  unidadeTributavel?: string
+  gtin?: string
+  origem?: number
+  /** CSOSN (Simples) — ex '102' */
+  cstCsosn?: string
+  /** CST ICMS (Regime Normal) — ex '00' */
+  cstIcms?: string
+  aliquotaIcms?: number
+  cstPis?: string
+  aliquotaPis?: number
+  cstCofins?: string
+  aliquotaCofins?: number
+  cstIpi?: string
+  aliquotaIpi?: number
+  pesoLiquido?: number
+  pesoBruto?: number
+  exTipi?: string
 }
 
 export interface PagamentoInput {
