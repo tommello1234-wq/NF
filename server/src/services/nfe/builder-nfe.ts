@@ -352,6 +352,21 @@ function montarDet(item: ItemXml, ctx: BuildNfeInput) {
  * IPI quando o produto tem alíquota, PIS/COFINS NT (49) por padrão, e o grupo
  * ICMSUFDest pra venda interestadual a consumidor final.
  */
+/**
+ * Mapeia o CSOSN pro grupo XML correspondente (leiaute NF-e 4.00). Vários
+ * CSOSN dividem o mesmo grupo — 102/103/300/400 caem todos em ICMSSN102, e
+ * 202/203 em ICMSSN202. Código desconhecido cai em ICMSSN900 ("Outros"), que
+ * é o grupo genérico e válido, em vez de gerar uma tag inexistente.
+ */
+function grupoIcmsSn(csosn: string): string {
+  if (csosn === '101') return 'ICMSSN101'
+  if (['102', '103', '300', '400'].includes(csosn)) return 'ICMSSN102'
+  if (csosn === '201') return 'ICMSSN201'
+  if (['202', '203'].includes(csosn)) return 'ICMSSN202'
+  if (csosn === '500') return 'ICMSSN500'
+  return 'ICMSSN900'
+}
+
 function montarImposto(item: ItemXml, interestadual: boolean, crt: 1 | 2 | 3 | 4 = 1) {
   const orig = String(item.origem)
   const code = item.cstCsosn
@@ -362,11 +377,14 @@ function montarImposto(item: ItemXml, interestadual: boolean, crt: 1 | 2 | 3 | 4
   const icms: Record<string, unknown> = {}
 
   if (isSimples) {
-    // Simples Nacional — usa CSOSN
-    if (code === '500' || code === '900') {
-      icms[`ICMSSN${code}`] = { orig, CSOSN: code }
-    } else if (code === '101' || code === '201') {
-      icms[`ICMSSN${code}`] = {
+    // Simples Nacional — o CSOSN vai no conteúdo, mas o NOME DO GRUPO não é
+    // "ICMSSN"+CSOSN: o leiaute 4.00 só tem 6 grupos, e vários CSOSN
+    // compartilham o mesmo. Concatenar gerava <ICMSSN400>, <ICMSSN300>,
+    // <ICMSSN103>, <ICMSSN203> — tags inexistentes no XSD, e o lote é
+    // recusado na validação de schema antes de qualquer análise fiscal.
+    const grupo = grupoIcmsSn(code)
+    if (grupo === 'ICMSSN101' || grupo === 'ICMSSN201') {
+      icms[grupo] = {
         orig,
         CSOSN: code,
         ...(item.aliquotaIcms != null
@@ -377,7 +395,7 @@ function montarImposto(item: ItemXml, interestadual: boolean, crt: 1 | 2 | 3 | 4
           : {}),
       }
     } else {
-      icms[`ICMSSN${code}`] = { orig, CSOSN: code }
+      icms[grupo] = { orig, CSOSN: code }
     }
   } else {
     // Regime Normal — usa CST (00, 10, 20, 30, 40, 41, 50, 51, 60, 70, 90)

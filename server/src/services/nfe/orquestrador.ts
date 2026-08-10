@@ -416,7 +416,10 @@ async function carregarItens(
       unidadeTributavel: p.unidade_tributavel || p.unidade || 'UN',
       quantidadeComercial: quantidade,
       valorUnitario: valorUnit,
-      valorTotal: +(valorUnit * quantidade - desconto).toFixed(2),
+      // vProd é BRUTO (qCom × vUnCom) — o desconto vai só em vDesc. Subtrair
+      // aqui fazia o desconto ser descontado duas vezes no vNF (calcularTotais
+      // já faz ΣvProd − ΣvDesc), deixando a nota com valor MENOR que a venda.
+      valorTotal: +(valorUnit * quantidade).toFixed(2),
       gtin: p.gtin || 'SEM GTIN',
       origem: p.origem ?? 0,
       // A escolha do código é DITADA PELO REGIME, não pela ordem dos campos:
@@ -482,7 +485,8 @@ function itemXmlDeInline(
     unidadeTributavel: pr.unidadeTributavel || pr.unidade || 'UN',
     quantidadeComercial: quantidade,
     valorUnitario: valorUnit,
-    valorTotal: +(valorUnit * quantidade - desconto).toFixed(2),
+    // vProd BRUTO — ver comentário em carregarItens. O desconto vai em vDesc.
+    valorTotal: +(valorUnit * quantidade).toFixed(2),
     gtin: pr.gtin || 'SEM GTIN',
     origem: pr.origem ?? 0,
     // Mesma regra do caminho do banco: o regime da empresa decide CSOSN vs CST.
@@ -583,11 +587,15 @@ async function resolverDestinatario(input: NfeInput) {
 }
 
 function calcularTotais(itens: ItemXml[], _input: NfeInput, crt: 1 | 2 | 3 | 4 = 1) {
+  // valorTotal do item é o BRUTO (qCom × vUnCom); vProd/ICMSTot usam ele e o
+  // desconto entra uma vez só, em vDesc. Já a BASE DE CÁLCULO dos tributos é
+  // sobre o valor líquido — por isso `base()` abaixo, e não valorTotal cru.
+  const base = (i: ItemXml) => i.valorTotal - (i.valorDesconto || 0)
   const valorProdutos = itens.reduce((s, i) => s + i.valorTotal, 0)
   const valorDesconto = itens.reduce((s, i) => s + (i.valorDesconto || 0), 0)
   const valorIpi = itens.reduce((s, i) => {
     if (!i.aliquotaIpi) return s
-    return s + (i.valorTotal * (i.aliquotaIpi / 100))
+    return s + (base(i) * (i.aliquotaIpi / 100))
   }, 0)
   // No Simples Nacional o ICMS próprio NÃO é destacado na nota (ele já está no
   // DAS). Os grupos CSOSN não carregam vICMS/vBC, então os totais devem ser 0 —
@@ -602,7 +610,7 @@ function calcularTotais(itens: ItemXml[], _input: NfeInput, crt: 1 | 2 | 3 | 4 =
         // CST 40/41/50/60 não destacam ICMS — não somar.
         const cst = i.cstCsosn
         if (['40', '41', '50', '60'].includes(cst)) return s
-        return s + (i.valorTotal * (i.aliquotaIcms / 100))
+        return s + (base(i) * (i.aliquotaIcms / 100))
       }, 0)
   const valorBaseIcms = isSimples
     ? 0
@@ -610,18 +618,18 @@ function calcularTotais(itens: ItemXml[], _input: NfeInput, crt: 1 | 2 | 3 | 4 =
         if (!i.aliquotaIcms) return s
         const cst = i.cstCsosn
         if (['40', '41', '50', '60'].includes(cst)) return s
-        return s + i.valorTotal
+        return s + base(i)
       }, 0)
   // PIS / COFINS: soma só dos itens com CST tributável (PISAliq, COFINSAliq).
   // Pra CST 04, 06-09, 49 (NT/Outras), o item não soma.
   const cstsTributados = ['01', '02']
   const valorPisTotal = itens.reduce((s, i) => {
     if (!cstsTributados.includes(i.cstPis) || !i.aliquotaPis) return s
-    return s + (i.valorTotal * (i.aliquotaPis / 100))
+    return s + (base(i) * (i.aliquotaPis / 100))
   }, 0)
   const valorCofinsTotal = itens.reduce((s, i) => {
     if (!cstsTributados.includes(i.cstCofins) || !i.aliquotaCofins) return s
-    return s + (i.valorTotal * (i.aliquotaCofins / 100))
+    return s + (base(i) * (i.aliquotaCofins / 100))
   }, 0)
 
   return {
