@@ -83,6 +83,8 @@ const emitirSchema = z.object({
   pagamento: z.object({
     forma: z.string(),
     valor: z.coerce.number().positive(),
+    /** xPag — obrigatório pra forma '99' (rejeição 441 sem ele). */
+    descricao: z.string().max(60).optional(),
     troco: z.coerce.number().nonnegative().optional(),
   }),
   informacoes_complementares: z.string().max(5000).optional().nullable(),
@@ -159,6 +161,7 @@ export async function adminNfeRoutes(app: FastifyInstance) {
         pagamento: {
           forma: body.pagamento.forma as NfeInput['pagamento']['forma'],
           valor: body.pagamento.valor,
+          descricao: body.pagamento.descricao,
           troco: body.pagamento.troco,
         },
         informacoesComplementares: body.informacoes_complementares || undefined,

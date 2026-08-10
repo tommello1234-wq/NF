@@ -66,6 +66,8 @@ const pagamentoSchema = z.object({
     '01', '02', '03', '04', '05', '10', '11', '12', '13', '15', '17', '18', '19', '90', '99',
   ]),
   valor: z.coerce.number().positive(),
+  /** xPag — obrigatório pra forma '99' (a SEFAZ rejeita com 441 sem ele). */
+  descricao: z.string().max(60).optional(),
   troco: z.coerce.number().nonnegative().optional(),
   cnpj_credenciadora: z.string().optional(),
   bandeira: z.string().optional(),
@@ -337,6 +339,7 @@ async function emitir(
       pagamento: {
         forma: body.pagamento.forma,
         valor: body.pagamento.valor,
+        descricao: body.pagamento.descricao,
         troco: body.pagamento.troco,
         cnpjCredenciadora: body.pagamento.cnpj_credenciadora,
         bandeira: body.pagamento.bandeira,

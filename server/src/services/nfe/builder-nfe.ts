@@ -172,6 +172,8 @@ export interface TranspXml {
 export interface PagamentoXml {
   forma: string                       // tPag (01, 03, 17, etc.)
   valor: number
+  /** xPag — obrigatório quando tPag=99 (Outros). Rejeição 441 sem isso. */
+  descricao?: string
   troco?: number
   cnpjCredenciadora?: string
   bandeira?: string
@@ -632,6 +634,14 @@ function montarPag(pagamentos: PagamentoXml[]) {
     detPag: pagamentos.map((p) => ({
       indPag: '0',
       tPag: p.forma,
+      // xPag vem depois de tPag e antes de vPag no XSD. A SEFAZ EXIGE quando
+      // tPag=99 (rejeição 441); nos demais é opcional. Default pra não deixar
+      // a nota cair só por falta de texto.
+      ...(p.forma === '99'
+        ? { xPag: (p.descricao || 'Outros').slice(0, 60) }
+        : p.descricao
+          ? { xPag: p.descricao.slice(0, 60) }
+          : {}),
       vPag: p.valor.toFixed(2),
       ...(p.cnpjCredenciadora || p.bandeira || p.autorizacao
         ? {

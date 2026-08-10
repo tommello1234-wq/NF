@@ -165,6 +165,8 @@ export interface ItemProdutoInline {
 export interface PagamentoInput {
   forma: TipoPagamento
   valor: number
+  /** xPag — obrigatório pra forma '99' (Outros). Ex: "Crediário Boleto Cora". */
+  descricao?: string
   troco?: number
   /** CNPJ da credenciadora (cartão), opcional */
   cnpjCredenciadora?: string

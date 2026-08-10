@@ -179,6 +179,7 @@ export async function emitirNfe(input: NfeInput): Promise<NfeResult> {
       {
         forma: input.pagamento.forma,
         valor: input.pagamento.valor,
+        descricao: input.pagamento.descricao,
         troco: input.pagamento.troco,
         cnpjCredenciadora: input.pagamento.cnpjCredenciadora,
         bandeira: input.pagamento.bandeira,
