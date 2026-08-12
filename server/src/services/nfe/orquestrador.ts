@@ -466,6 +466,13 @@ function itemXmlDeInline(
   }
   if (!pr.descricao?.trim()) throw new Error(`Item ${idx + 1}: produto.descricao é obrigatório`)
   const ncm = (pr.ncm || '').replace(/\D/g, '')
+  // 00000000 tem 8 dígitos mas não é NCM — passava na validação e ia pro XML,
+  // virando rejeição 778 (NCM inexistente na TIPI) já na SEFAZ.
+  if (ncm === '00000000') {
+    throw new Error(
+      `Item ${idx + 1} (${pr.descricao}): NCM 00000000 é um placeholder, não um NCM válido — cadastre o NCM real do produto`,
+    )
+  }
   if (ncm.length !== 8) {
     throw new Error(
       `Item ${idx + 1} (${pr.descricao}): NCM inválido ou ausente — a SEFAZ exige 8 dígitos`,

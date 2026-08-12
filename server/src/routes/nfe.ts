@@ -49,7 +49,10 @@ const itemSchema = z
   .object({
     produto_id: z.string().uuid().optional(),
     quantidade: z.coerce.number().positive(),
-    valor_unitario: z.coerce.number().positive().optional(),
+    // nonnegative (e não positive): item de brinde/garantia sai com valor 0 e
+    // faz parte da nota. Bloquear aqui derrubava a venda inteira. O que não
+    // pode é o TOTAL da nota ser zero — isso o orquestrador barra.
+    valor_unitario: z.coerce.number().nonnegative().optional(),
     valor_desconto: z.coerce.number().nonnegative().optional(),
     cfop: z.string().regex(/^\d{4}$/).optional(),
     info_adicional: z.string().max(500).optional(),
