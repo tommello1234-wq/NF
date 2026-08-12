@@ -5,6 +5,7 @@ import { emitirNfe } from '../services/nfe/orquestrador.js'
 import { cancelarNota } from '../services/nfe/cancelamento-orquestrador.js'
 import { inutilizarNumeracao } from '../services/nfe/inutilizacao-orquestrador.js'
 import { gerarDanfeNfe, gerarDanfeNfceBobina } from '../services/nfe/danfe.js'
+import { baixarArquivoStorage } from '../services/nfe/comprovantes.js'
 import { supabase } from '../services/supabase.js'
 import type { NfeInput, Modelo } from '../services/nfe/types.js'
 
@@ -181,6 +182,43 @@ export async function nfeRoutes(app: FastifyInstance) {
       return reply.status(500).send({ error: (e as Error).message })
     }
   })
+
+  /**
+   * GET /v1/nfe/:id/xml — XML da nota. ?tipo=autorizado (default, o nfeProc
+   * que vale pra contabilidade) ou ?tipo=assinado (o pré-envio).
+   */
+  app.get<{ Params: { id: string }; Querystring: { tipo?: string } }>(
+    '/nfe/:id/xml',
+    async (req, reply) => {
+      try {
+        const { data: nota } = await supabase
+          .from('notas_fiscais')
+          .select('empresa_id, xml_path, xml_proc_path')
+          .eq('id', req.params.id)
+          .maybeSingle()
+        if (!nota) return reply.status(404).send({ error: 'Nota não encontrada' })
+        if (nota.empresa_id !== req.empresaId) {
+          return reply.status(403).send({ error: 'Nota não pertence à empresa da API key' })
+        }
+
+        const tipo = req.query.tipo === 'assinado' ? 'assinado' : 'autorizado'
+        const path = tipo === 'autorizado' ? nota.xml_proc_path : nota.xml_path
+        if (!path) {
+          return reply.status(404).send({
+            error: `XML ${tipo} não disponível pra essa nota (nota não autorizada?)`,
+          })
+        }
+        const file = await baixarArquivoStorage('notas-xml', path)
+        if (!file) return reply.status(404).send({ error: 'Arquivo XML não encontrado no Storage' })
+
+        reply.header('Content-Type', 'application/xml; charset=utf-8')
+        reply.header('Content-Disposition', `attachment; filename="${file.filename}"`)
+        return reply.send(file.buffer)
+      } catch (e) {
+        return reply.status(500).send({ error: (e as Error).message })
+      }
+    },
+  )
 
   /** POST /v1/nfe/inutilizar — inutiliza um intervalo de numeração */
   app.post('/nfe/inutilizar', async (req, reply) => {
