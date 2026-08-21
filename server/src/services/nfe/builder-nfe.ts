@@ -658,12 +658,25 @@ function montarPag(pagamentos: PagamentoXml[]) {
       // emite xPag é o 99 — mandar em '01', '05' etc. derruba a nota.
       ...(p.forma === '99' ? { xPag: (p.descricao || 'Outros').slice(0, 60) } : {}),
       vPag: p.valor.toFixed(2),
-      ...(p.cnpjCredenciadora || p.bandeira || p.autorizacao
+      // O grupo <card> é OBRIGATÓRIO quando o pagamento é cartão de crédito
+      // (03) ou débito (04) — sem ele a SEFAZ rejeita com 391 ("não informados
+      // os dados do cartão"). Antes só era emitido quando vinha CNPJ da
+      // credenciadora/bandeira/autorização, então toda venda no cartão caía.
+      //
+      // tpIntegra=2 = "pagamento NÃO integrado com o sistema de automação"
+      // (maquininha à parte, que é o caso das óticas). Nesse modo CNPJ, tBand
+      // e cAut são opcionais — só mandamos o que a venda tiver de verdade.
+      ...(p.forma === '03' || p.forma === '04' || p.cnpjCredenciadora || p.bandeira || p.autorizacao
         ? {
             card: {
+              // Sempre 2: tpIntegra=1 significa maquininha integrada ao sistema
+              // (TEF) e faz a SEFAZ exigir o CNPJ da credenciadora. As óticas
+              // usam maquininha à parte — dizer 1 seria falso e derrubaria a nota.
               tpIntegra: '2',
               ...(p.cnpjCredenciadora ? { CNPJ: p.cnpjCredenciadora } : {}),
-              ...(p.bandeira ? { tBand: p.bandeira } : {}),
+              // tBand é código de 2 dígitos (01=Visa, 02=Master, 06=Elo...).
+              // Texto livre ("Visa") reprovaria no schema — melhor omitir.
+              ...(p.bandeira && /^\d{2}$/.test(p.bandeira) ? { tBand: p.bandeira } : {}),
               ...(p.autorizacao ? { cAut: p.autorizacao } : {}),
             },
           }
