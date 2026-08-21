@@ -11,7 +11,9 @@ const naturezaSchema = z.object({
   finalidade: z.enum(['normal', 'complementar', 'ajuste', 'devolucao']).default('normal'),
   cfop_padrao: z.string().optional().nullable(),
   consumidor_final: z.boolean().default(true),
-  indicador_presenca: z.coerce.number().int().min(0).max(9).default(9),
+  // Default 1 (presencial): a NFC-e só aceita 1/4/5, e o 9 fazia toda
+  // natureza criada pelo painel nascer inválida pro modelo 65.
+  indicador_presenca: z.coerce.number().int().min(0).max(9).default(1),
   modalidade_frete: z.coerce.number().int().min(0).max(9).default(9),
   informacoes_adicionais: z.string().optional().nullable(),
   ativo: z.boolean().optional(),

@@ -193,7 +193,13 @@ export function buildNfeXml(input: BuildNfeInput): { xml: string; idNfe: string 
     ide: montarIde(input),
     emit: montarEmit(input.emit),
   }
-  if (input.dest) infNFe.dest = montarDest(input.dest)
+  // O grupo <dest> é opcional na NFC-e (consumidor não identificado), mas SE
+  // existir o XSD exige um de CNPJ/CPF/idEstrangeiro. Cliente cadastrado sem
+  // documento (ou com documento incompleto) gerava um <dest> só com o nome —
+  // XML inválido, recusado no schema. Sem documento, melhor não emitir o grupo.
+  if (input.dest && (input.dest.cpf || input.dest.cnpj)) {
+    infNFe.dest = montarDest(input.dest)
+  }
   infNFe.det = input.itens.map((item) => montarDet(item, input))
   infNFe.total = montarTotal(input.total)
   infNFe.transp = montarTransp(input.transp)
@@ -250,8 +256,19 @@ function montarIde(input: BuildNfeInput) {
     tpAmb: String(input.ambiente),
     finNFe: String(input.finalidade),
     indFinal: input.consumidorFinal ? '1' : '0',
-    indPres: String(input.indicadorPresenca),
-    // indIntermed obrigatório quando finNFe=1 e indPres em {1,5} — sinaliza marketplace.
+    // NFC-e (65) é sempre operação COM presença do comprador: o autorizador só
+    // aceita indPres 1 (presencial), 4 (entrega a domicílio) ou 5 (fora do
+    // estabelecimento). Como o valor vem da natureza de operação — e o cadastro
+    // de natureza nasce com 9 ("Outros") por default — uma loja nova quebraria
+    // 100% das notas. Aqui corrigimos pro presencial em vez de confiar no
+    // cadastro; pra NF-e (55) o valor da natureza vale como está.
+    indPres: String(
+      input.modelo === 65 && ![1, 4, 5].includes(Number(input.indicadorPresenca))
+        ? 1
+        : input.indicadorPresenca,
+    ),
+    // indIntermed identifica venda por intermediador/marketplace — cenário de
+    // operação NÃO presencial. Na venda de balcão sai 0.
     indIntermed: input.intermediador ? '1' : '0',
     procEmi: '0',                                     // 0=aplicativo do contribuinte
     verProc: 'NF-API-1.0',

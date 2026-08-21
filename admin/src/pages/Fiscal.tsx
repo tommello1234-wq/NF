@@ -28,7 +28,7 @@ const emptyNatureza: NaturezaOperacao = {
   finalidade: 'normal',
   cfop_padrao: '5102',
   consumidor_final: true,
-  indicador_presenca: 9,
+  indicador_presenca: 1,
   modalidade_frete: 9,
   informacoes_adicionais: '',
   ativo: true,
