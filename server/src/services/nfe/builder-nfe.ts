@@ -676,14 +676,15 @@ function montarPag(pagamentos: PagamentoXml[]) {
       ...(p.forma === '99' ? { xPag: (p.descricao || 'Outros').slice(0, 60) } : {}),
       vPag: p.valor.toFixed(2),
       // O grupo <card> é OBRIGATÓRIO quando o pagamento é cartão de crédito
-      // (03) ou débito (04) — sem ele a SEFAZ rejeita com 391 ("não informados
-      // os dados do cartão"). Antes só era emitido quando vinha CNPJ da
-      // credenciadora/bandeira/autorização, então toda venda no cartão caía.
+      // (03), débito (04) ou PIX dinâmico (17) — sem ele a SEFAZ rejeita com
+      // 391 ("não informados os dados do cartão"). Antes só era emitido quando
+      // vinha CNPJ da credenciadora/bandeira/autorização, então toda venda no
+      // cartão caía; o PIX caiu do mesmo jeito quando a SEFAZ estendeu a regra.
       //
       // tpIntegra=2 = "pagamento NÃO integrado com o sistema de automação"
       // (maquininha à parte, que é o caso das óticas). Nesse modo CNPJ, tBand
       // e cAut são opcionais — só mandamos o que a venda tiver de verdade.
-      ...(p.forma === '03' || p.forma === '04' || p.cnpjCredenciadora || p.bandeira || p.autorizacao
+      ...(p.forma === '03' || p.forma === '04' || p.forma === '17' || p.cnpjCredenciadora || p.bandeira || p.autorizacao
         ? {
             card: {
               // Sempre 2: tpIntegra=1 significa maquininha integrada ao sistema
