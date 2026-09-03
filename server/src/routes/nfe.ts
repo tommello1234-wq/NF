@@ -6,6 +6,7 @@ import { cancelarNota } from '../services/nfe/cancelamento-orquestrador.js'
 import { inutilizarNumeracao } from '../services/nfe/inutilizacao-orquestrador.js'
 import { gerarDanfeNfe, gerarDanfeNfceBobina } from '../services/nfe/danfe.js'
 import { baixarArquivoStorage } from '../services/nfe/comprovantes.js'
+import { htmlToPdf } from '../services/nfe/pdf.js'
 import { supabase } from '../services/supabase.js'
 import type { NfeInput, Modelo } from '../services/nfe/types.js'
 
@@ -181,6 +182,35 @@ export async function nfeRoutes(app: FastifyInstance) {
           : await gerarDanfeNfe(req.params.id)
       reply.header('Content-Type', 'text/html; charset=utf-8')
       return reply.send(html)
+    } catch (e) {
+      return reply.status(500).send({ error: (e as Error).message })
+    }
+  })
+
+  /**
+   * GET /v1/nfe/:id/danfe.pdf — DANFE em PDF (NFC-e em bobina 80mm, NF-e em A4).
+   * É o formato pra enviar ao cliente; o /danfe devolve o mesmo em HTML.
+   */
+  app.get<{ Params: { id: string } }>('/nfe/:id/danfe.pdf', async (req, reply) => {
+    try {
+      const { data: nota } = await supabase
+        .from('notas_fiscais')
+        .select('modelo, tipo, numero, chave_acesso, empresa_id')
+        .eq('id', req.params.id)
+        .maybeSingle()
+      if (!nota) return reply.status(404).send({ error: 'Nota não encontrada' })
+      if (nota.empresa_id !== req.empresaId) {
+        return reply.status(403).send({ error: 'Nota não pertence à empresa da API key' })
+      }
+      const ehNfce = nota.modelo != null ? Number(nota.modelo) === 65 : nota.tipo === 'nfce'
+      const html = ehNfce
+        ? await gerarDanfeNfceBobina(req.params.id)
+        : await gerarDanfeNfe(req.params.id)
+      const pdf = await htmlToPdf(html, { formato: ehNfce ? 'bobina-80mm' : 'a4' })
+      const fname = `danfe-${ehNfce ? 'nfce' : 'nfe'}-${nota.numero || nota.chave_acesso?.slice(-8) || 'nota'}.pdf`
+      reply.header('Content-Type', 'application/pdf')
+      reply.header('Content-Disposition', `attachment; filename="${fname}"`)
+      return reply.send(pdf)
     } catch (e) {
       return reply.status(500).send({ error: (e as Error).message })
     }
