@@ -55,7 +55,16 @@ export async function emitirNfe(input: NfeInput): Promise<NfeResult> {
   const cert = await carregarCertificado(input.empresaId)
   if (!cert) throw new Error('Certificado A1 não encontrado pra empresa')
   const crt = (empresa.crt as 1 | 2 | 3 | 4) || 1
-  const itensXml = await carregarItens(input.itens, crt)
+  // Padrões fiscais da empresa: usados só no Regime Normal, quando o item
+  // vem sem CST/alíquota de ICMS (é o caso do ERP externo, cujo catálogo só
+  // tem o código do Simples). Sem isso a nota sairia "tributada
+  // integralmente" com imposto zero.
+  const padroesIcms: PadroesIcmsEmpresa = {
+    cst: empresa.icms_cst_padrao || undefined,
+    aliquota:
+      empresa.icms_aliquota_padrao != null ? Number(empresa.icms_aliquota_padrao) : undefined,
+  }
+  const itensXml = await carregarItens(input.itens, crt, padroesIcms)
   // Regra SEFAZ: em homologação (ambiente=2) a descrição do PRIMEIRO item DEVE
   // ser literalmente esse texto. Caso contrário cStat 373.
   if (ambiente === 2 && itensXml[0]) {
@@ -379,9 +388,16 @@ async function carregarNatureza(naturezaId: string) {
   return data
 }
 
+/** Padrão de ICMS da empresa pra itens inline sem tributação informada. */
+interface PadroesIcmsEmpresa {
+  cst?: string
+  aliquota?: number
+}
+
 async function carregarItens(
   itens: NfeInput['itens'],
   crt: 1 | 2 | 3 | 4 = 1,
+  padroesIcms: PadroesIcmsEmpresa = {},
 ): Promise<ItemXml[]> {
   // Só busca no banco os itens que referenciam um produto cadastrado aqui.
   // Itens "inline" (ERP externo dono do catálogo) trazem os dados no payload.
@@ -395,7 +411,7 @@ async function carregarItens(
 
   return itens.map((it, idx) => {
     if (!it.produtoId) {
-      return itemXmlDeInline(it, idx, crt)
+      return itemXmlDeInline(it, idx, crt, padroesIcms)
     }
     const p = produtos.find((x) => (x as { id?: string }).id === it.produtoId) as
       | Record<string, any>
@@ -457,6 +473,7 @@ function itemXmlDeInline(
   it: NfeInput['itens'][number],
   idx: number,
   crt: 1 | 2 | 3 | 4,
+  padroesIcms: PadroesIcmsEmpresa = {},
 ): ItemXml {
   const pr = it.produto
   if (!pr) {
@@ -497,11 +514,23 @@ function itemXmlDeInline(
     gtin: pr.gtin || 'SEM GTIN',
     origem: pr.origem ?? 0,
     // Mesma regra do caminho do banco: o regime da empresa decide CSOSN vs CST.
-    cstCsosn: crt === 1 || crt === 4 ? pr.cstCsosn || '102' : pr.cstIcms || '00',
+    // No Regime Normal cai no padrão da empresa antes do '00' genérico:
+    // dizer '00' sem alíquota é declarar imposto zero num item tributado.
+    cstCsosn:
+      crt === 1 || crt === 4
+        ? pr.cstCsosn || '102'
+        : pr.cstIcms || padroesIcms.cst || '00',
     cstPis: pr.cstPis || '49',
     cstCofins: pr.cstCofins || '49',
     cstIpi: pr.cstIpi || undefined,
-    aliquotaIcms: pr.aliquotaIcms != null ? Number(pr.aliquotaIcms) : undefined,
+    // No Regime Normal, alíquota ausente + CST tributado = imposto zero numa
+    // nota que diz ser tributada. Cai no padrão da empresa antes disso.
+    aliquotaIcms:
+      pr.aliquotaIcms != null
+        ? Number(pr.aliquotaIcms)
+        : crt === 3
+          ? padroesIcms.aliquota
+          : undefined,
     aliquotaPis: pr.aliquotaPis != null ? Number(pr.aliquotaPis) : undefined,
     aliquotaCofins: pr.aliquotaCofins != null ? Number(pr.aliquotaCofins) : undefined,
     aliquotaIpi: pr.aliquotaIpi != null ? Number(pr.aliquotaIpi) : undefined,
