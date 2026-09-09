@@ -263,6 +263,20 @@ function escape(s: unknown): string {
     .replace(/"/g, '&quot;')
 }
 
+/** Nome por extenso do tPag — o cupom mostra o meio de pagamento, não o código. */
+const NOME_PAGAMENTO: Record<string, string> = {
+  '01': 'DINHEIRO', '02': 'CHEQUE', '03': 'CARTAO DE CREDITO', '04': 'CARTAO DE DEBITO',
+  '05': 'CREDITO LOJA', '10': 'VALE ALIMENTACAO', '11': 'VALE REFEICAO',
+  '12': 'VALE PRESENTE', '13': 'VALE COMBUSTIVEL', '15': 'BOLETO BANCARIO',
+  '16': 'DEPOSITO BANCARIO', '17': 'PIX', '18': 'TRANSFERENCIA BANCARIA',
+  '19': 'PROGRAMA DE FIDELIDADE', '90': 'SEM PAGAMENTO', '99': 'OUTROS',
+}
+
+function nomePagamento(forma: unknown): string {
+  const c = String(forma || '').padStart(2, '0')
+  return NOME_PAGAMENTO[c] || `OUTROS (${c})`
+}
+
 /** Formata CPF (000.000.000-00) ou CNPJ (00.000.000/0000-00) pelo tamanho. */
 function formatDoc(v: unknown): string {
   const d = String(v || '').replace(/\D/g, '')
@@ -817,6 +831,8 @@ function renderNfceHtml(d: DanfeData, qrDataUrl: string | null): string {
     : 'CONSUMIDOR NÃO IDENTIFICADO'
   // Frase obrigatória do Simples Nacional (CRT 1/4) — vem no cupom da rede.
   const isSimples = [1, 4].includes(Number(e.crt || 1))
+  // Lei 12.741/2012: o cupom precisa informar o valor aproximado dos tributos.
+  const tributos = Number(n.valor_total_tributos || 0)
 
   return `<!doctype html>
 <html lang="pt-BR">
@@ -858,6 +874,7 @@ function renderNfceHtml(d: DanfeData, qrDataUrl: string | null): string {
   <div class="center">${escape([e.endereco_bairro, e.endereco_cidade, e.endereco_uf].filter(Boolean).join(' - '))}</div>
   <hr />
   <div class="center bold">DANFE NFC-e — Nota Fiscal de Consumidor Eletrônica</div>
+  <div class="center" style="font-size: 9px;">Não permite aproveitamento de crédito de ICMS</div>
   ${ambiente === 'Homologação' ? '<div class="stamp">SEM VALOR FISCAL — HOMOLOGAÇÃO</div>' : ''}
   <hr />
   <table>
@@ -873,15 +890,18 @@ function renderNfceHtml(d: DanfeData, qrDataUrl: string | null): string {
     <tr><td>Valor total</td><td class="num">${money(totalItens)}</td></tr>
     ${desconto > 0 ? `<tr><td>Desconto</td><td class="num">${money(desconto)}</td></tr>` : ''}
     <tr><td class="bold">Valor a pagar</td><td class="num bold">${money(n.valor_total)}</td></tr>
-    <tr><td>Pagamento (${escape(n.forma_pagamento || '-')})</td><td class="num">${money(n.valor_pago || n.valor_total)}</td></tr>
+  </table>
+  <table>
+    <tr><th>FORMA PAGAMENTO</th><th class="num">VALOR PAGO R$</th></tr>
+    <tr><td>${escape(nomePagamento(n.forma_pagamento))}</td><td class="num">${money(n.valor_pago || n.valor_total)}</td></tr>
     ${Number(n.troco || 0) > 0 ? `<tr><td>Troco</td><td class="num">${money(n.troco)}</td></tr>` : ''}
   </table>
   <hr />
   <div class="center">${consumidor}</div>
   <hr />
-  <div>NFC-e nº ${escape(n.numero || '-')} — Série ${escape(n.serie || '-')}</div>
-  <div>${dt}</div>
-  ${n.protocolo ? `<div>Protocolo: ${escape(n.protocolo)}</div>` : ''}
+  <div>NFC-e nº ${String(n.numero || 0).padStart(9, '0')} — Série ${String(n.serie || 0).padStart(3, '0')}</div>
+  ${n.protocolo ? `<div>Protocolo de Autorização: ${escape(n.protocolo)}</div>` : ''}
+  <div>Data de Autorização: ${dt}</div>
   <div style="word-break: break-all;">Chave: ${escape(String(n.chave_acesso || '').match(/.{1,4}/g)?.join(' ') || '-')}</div>
   ${qrDataUrl
     ? `<div class="qr"><img src="${qrDataUrl}" alt="QR Code NFC-e" /></div>
@@ -889,6 +909,9 @@ function renderNfceHtml(d: DanfeData, qrDataUrl: string | null): string {
     : '<div class="center" style="font-size: 9px;">QR Code não disponível.</div>'}
   ${isSimples
     ? `<hr /><div class="center" style="font-size: 8px;">DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL.<br />NÃO GERA DIREITO A CRÉDITO FISCAL DE IPI.</div>`
+    : ''}
+  ${tributos > 0
+    ? `<div class="center" style="font-size: 8px;">Valor aprox. dos tributos: ${money(tributos)}. Fonte: IBPT (Lei 12.741/2012)</div>`
     : ''}
 </div>
 </body>
