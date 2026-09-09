@@ -263,6 +263,14 @@ function escape(s: unknown): string {
     .replace(/"/g, '&quot;')
 }
 
+/** Formata CPF (000.000.000-00) ou CNPJ (00.000.000/0000-00) pelo tamanho. */
+function formatDoc(v: unknown): string {
+  const d = String(v || '').replace(/\D/g, '')
+  if (d.length === 11) return d.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4')
+  if (d.length === 14) return d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5')
+  return d
+}
+
 function formatCnpj(v: unknown): string {
   const d = String(v || '').replace(/\D/g, '')
   if (d.length === 14) return d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5')
@@ -776,18 +784,39 @@ function renderNfceHtml(d: DanfeData, qrDataUrl: string | null): string {
   const ambiente = Number(n.ambiente_nfe || 2) === 1 ? 'Produção' : 'Homologação'
   const dt = n.data_autorizacao ? new Date(String(n.data_autorizacao)).toLocaleString('pt-BR') : '-'
 
+  // Layout padrão do cupom fiscal: DUAS linhas por item. A primeira traz
+  // "# CÓDIGO DESCRIÇÃO" e a segunda "QTDE UN VL.UNIT VL.TOTAL". O código do
+  // produto é o que a contabilidade usa pra conferir a peça — sem ele o
+  // cupom é recusado na escrituração.
   const itensHtml = d.itens
     .map(
       (it, idx) => `
-      <tr>
-        <td>${idx + 1}</td>
-        <td class="desc">${escape(it.descricao)}</td>
-        <td>${num(it.quantidade_comercial, 3)}</td>
+      <tr class="it-l1">
+        <td class="ix">${idx + 1}</td>
+        <td class="cod">${escape(it.codigo_produto || '')}</td>
+        <td class="desc" colspan="3">${escape(it.descricao)}</td>
+      </tr>
+      <tr class="it-l2">
+        <td></td>
+        <td class="num">${num(it.quantidade_comercial, 2)}</td>
+        <td class="ctr">${escape(it.unidade_comercial || 'UN')}</td>
         <td class="num">${num(it.valor_unitario, 2)}</td>
         <td class="num">${money(it.valor_total)}</td>
       </tr>`,
     )
     .join('')
+
+  const qtdItens = d.itens.length
+  const totalItens = d.itens.reduce((s, it) => s + Number(it.valor_total || 0), 0)
+  const desconto = Number(n.valor_desconto || 0)
+  const docDest = String(n.destinatario_cpf_cnpj || '').replace(/\D/g, '')
+  const consumidor = docDest
+    ? `CONSUMIDOR — ${docDest.length === 11 ? 'CPF' : 'CNPJ'} ${formatDoc(docDest)}${
+        n.destinatario_nome ? ` — ${escape(String(n.destinatario_nome))}` : ''
+      }`
+    : 'CONSUMIDOR NÃO IDENTIFICADO'
+  // Frase obrigatória do Simples Nacional (CRT 1/4) — vem no cupom da rede.
+  const isSimples = [1, 4].includes(Number(e.crt || 1))
 
   return `<!doctype html>
 <html lang="pt-BR">
@@ -806,6 +835,12 @@ function renderNfceHtml(d: DanfeData, qrDataUrl: string | null): string {
   td { padding: 0.5mm 1mm; vertical-align: top; }
   td.desc { word-break: break-word; }
   td.num { text-align: right; }
+  td.ctr, th.ctr { text-align: center; }
+  th.num { text-align: right; }
+  td.ix { width: 5mm; }
+  td.cod { white-space: nowrap; padding-right: 2mm; }
+  tr.it-l1 td { padding-bottom: 0; }
+  tr.it-l2 td { padding-top: 0; border-bottom: 1px dotted #999; }
   th { font-size: 9px; font-weight: 600; text-align: left; border-bottom: 1px solid #000; padding: 0.5mm 1mm; }
   .qr { text-align: center; margin-top: 3mm; }
   .qr img { width: 36mm; height: 36mm; }
@@ -818,7 +853,7 @@ function renderNfceHtml(d: DanfeData, qrDataUrl: string | null): string {
 <body>
 <div class="bobina">
   <div class="center bold">${escape(e.razao_social)}</div>
-  <div class="center">CNPJ ${escape(formatCnpj(e.cnpj))}</div>
+  <div class="center">CNPJ ${escape(formatCnpj(e.cnpj))}${e.ie ? ` — IE ${escape(String(e.ie))}` : ''}</div>
   <div class="center">${escape([e.endereco_logradouro, e.endereco_numero].filter(Boolean).join(', '))}</div>
   <div class="center">${escape([e.endereco_bairro, e.endereco_cidade, e.endereco_uf].filter(Boolean).join(' - '))}</div>
   <hr />
@@ -827,16 +862,22 @@ function renderNfceHtml(d: DanfeData, qrDataUrl: string | null): string {
   <hr />
   <table>
     <thead>
-      <tr><th>#</th><th>Item</th><th>Qtd</th><th>Vl Un</th><th>Total</th></tr>
+      <tr><th>#</th><th>CÓDIGO</th><th colspan="3">DESCRIÇÃO</th></tr>
+      <tr><th></th><th class="num">QTDE</th><th class="ctr">UN</th><th class="num">VL.UNIT</th><th class="num">VL.TOTAL</th></tr>
     </thead>
     <tbody>${itensHtml}</tbody>
   </table>
   <hr />
   <table>
-    <tr><td class="bold">Total</td><td class="num bold">${money(n.valor_total)}</td></tr>
+    <tr><td>Qtde total de itens</td><td class="num">${qtdItens}</td></tr>
+    <tr><td>Valor total</td><td class="num">${money(totalItens)}</td></tr>
+    ${desconto > 0 ? `<tr><td>Desconto</td><td class="num">${money(desconto)}</td></tr>` : ''}
+    <tr><td class="bold">Valor a pagar</td><td class="num bold">${money(n.valor_total)}</td></tr>
     <tr><td>Pagamento (${escape(n.forma_pagamento || '-')})</td><td class="num">${money(n.valor_pago || n.valor_total)}</td></tr>
     ${Number(n.troco || 0) > 0 ? `<tr><td>Troco</td><td class="num">${money(n.troco)}</td></tr>` : ''}
   </table>
+  <hr />
+  <div class="center">${consumidor}</div>
   <hr />
   <div>NFC-e nº ${escape(n.numero || '-')} — Série ${escape(n.serie || '-')}</div>
   <div>${dt}</div>
@@ -846,6 +887,9 @@ function renderNfceHtml(d: DanfeData, qrDataUrl: string | null): string {
     ? `<div class="qr"><img src="${qrDataUrl}" alt="QR Code NFC-e" /></div>
        <div class="center" style="font-size: 9px;">Consulte pela chave em ${ambiente === 'Produção' ? 'nfce.sefaz.ce.gov.br' : 'nfceh.sefaz.ce.gov.br'}</div>`
     : '<div class="center" style="font-size: 9px;">QR Code não disponível.</div>'}
+  ${isSimples
+    ? `<hr /><div class="center" style="font-size: 8px;">DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL.<br />NÃO GERA DIREITO A CRÉDITO FISCAL DE IPI.</div>`
+    : ''}
 </div>
 </body>
 </html>`
