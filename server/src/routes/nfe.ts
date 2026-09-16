@@ -122,7 +122,37 @@ const emitirSchema = z.object({
     })
     .optional(),
   informacoes_complementares: z.string().max(5000).optional(),
+  /**
+   * Finalidade do documento. 'venda' (default) é finalidade 1; devolução vira
+   * finalidade 4, complementar 2, ajuste 3. Devolução ao fornecedor usa
+   * modelo 55 (NF-e), não NFC-e.
+   */
+  tipo_documento: z
+    .enum([
+      'venda', 'devolucao', 'devolucao_xml', 'remessa_garantia',
+      'remessa_garantia_xml', 'importacao', 'complementar', 'ajuste', 'outros',
+    ])
+    .optional()
+    .default('venda'),
+  /**
+   * Chave da NF-e referenciada (44 dígitos). Obrigatória em devolução,
+   * complementar e ajuste — é o que liga a nota ao documento de origem.
+   */
+  chave_acesso_referenciada: z
+    .string()
+    .regex(/^\d{44}$/, 'A chave da nota referenciada deve ter exatamente 44 dígitos')
+    .optional(),
 })
+  .refine(
+    (b) =>
+      !['devolucao', 'devolucao_xml', 'complementar', 'ajuste'].includes(b.tipo_documento) ||
+      Boolean(b.chave_acesso_referenciada),
+    {
+      message:
+        'Devolução, complementar e ajuste exigem "chave_acesso_referenciada" (44 dígitos da nota de origem)',
+      path: ['chave_acesso_referenciada'],
+    },
+  )
 
 export async function nfeRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authApiKey)
@@ -424,6 +454,8 @@ async function emitir(
           }
         : undefined,
       informacoesComplementares: body.informacoes_complementares,
+      tipoDocumento: body.tipo_documento,
+      chaveAcessoReferenciada: body.chave_acesso_referenciada,
     }
     const result = await emitirNfe(input)
     return reply.status(result.status === 'autorizada' ? 200 : 422).send(result)
