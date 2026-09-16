@@ -420,6 +420,21 @@ function montarImposto(item: ItemXml, interestadual: boolean, crt: 1 | 2 | 3 | 4
             }
           : {}),
       }
+    } else if (grupo === 'ICMSSN900' && item.aliquotaIcms != null) {
+      // CSOSN 900 ("Outros") é o ÚNICO grupo do Simples que carrega os campos
+      // de ICMS próprio. É o que permite destacar o imposto numa devolução de
+      // compra — o Simples normalmente não destaca (102), mas na devolução a
+      // nota precisa espelhar o ICMS que veio na entrada.
+      // Sem estes campos o grupo saía só com orig+CSOSN e o imposto sumia.
+      const base = item.valorTotal - (item.valorDesconto || 0)
+      icms[grupo] = {
+        orig,
+        CSOSN: code,
+        modBC: '3',
+        vBC: base.toFixed(2),
+        pICMS: item.aliquotaIcms.toFixed(4),
+        vICMS: ((base * item.aliquotaIcms) / 100).toFixed(2),
+      }
     } else {
       icms[grupo] = { orig, CSOSN: code }
     }

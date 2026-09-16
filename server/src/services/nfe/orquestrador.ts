@@ -641,23 +641,21 @@ function calcularTotais(itens: ItemXml[], _input: NfeInput, crt: 1 | 2 | 3 | 4 =
   const isSimples = crt === 1 || crt === 4
   // ICMS total = soma do (valorTotal × aliquotaIcms / 100) de cada item.
   // Pra CST 00/10/20 isso precisa bater com o somatório do XML — senão cStat 531.
-  const valorIcmsTotal = isSimples
-    ? 0
-    : itens.reduce((s, i) => {
-        if (!i.aliquotaIcms) return s
-        // CST 40/41/50/60 não destacam ICMS — não somar.
-        const cst = i.cstCsosn
-        if (['40', '41', '50', '60'].includes(cst)) return s
-        return s + (base(i) * (i.aliquotaIcms / 100))
-      }, 0)
-  const valorBaseIcms = isSimples
-    ? 0
-    : itens.reduce((s, i) => {
-        if (!i.aliquotaIcms) return s
-        const cst = i.cstCsosn
-        if (['40', '41', '50', '60'].includes(cst)) return s
-        return s + base(i)
-      }, 0)
+  // Regra de quem entra no total de ICMS:
+  //  - Simples: só CSOSN 900 destaca (é o caso da devolução de compra). Com
+  //    102 e afins o imposto está no DAS e o total tem que ficar zerado.
+  //  - Regime Normal: qualquer CST tributado; 40/41/50/60 não destacam.
+  // Se o item destaca ICMS e o total não somasse, o XML ficaria inconsistente
+  // (item com imposto, total sem) — rejeição 531.
+  const destacaIcms = (i: ItemXml) => {
+    if (!i.aliquotaIcms) return false
+    return isSimples ? i.cstCsosn === '900' : !['40', '41', '50', '60'].includes(i.cstCsosn)
+  }
+  const valorIcmsTotal = itens.reduce(
+    (s, i) => (destacaIcms(i) ? s + (base(i) * (i.aliquotaIcms! / 100)) : s),
+    0,
+  )
+  const valorBaseIcms = itens.reduce((s, i) => (destacaIcms(i) ? s + base(i) : s), 0)
   // PIS / COFINS: soma só dos itens com CST tributável (PISAliq, COFINSAliq).
   // Pra CST 04, 06-09, 49 (NT/Outras), o item não soma.
   const cstsTributados = ['01', '02']
