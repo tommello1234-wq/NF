@@ -72,13 +72,20 @@ const pagamentoSchema = z.object({
   forma: z.enum([
     '01', '02', '03', '04', '05', '10', '11', '12', '13', '15', '17', '18', '19', '90', '99',
   ]),
-  valor: z.coerce.number().positive(),
+  // nonnegative por causa do tPag 90 ("Sem pagamento"), usado em devolução e
+  // remessa: o grupo <pag> é obrigatório na NF-e 4.00 mesmo quando não há
+  // pagamento, e aí vPag é 0. Nas demais formas o valor tem que ser > 0
+  // (refine abaixo), senão uma venda com valor zerado passaria batido.
+  valor: z.coerce.number().nonnegative(),
   /** xPag — obrigatório pra forma '99' (a SEFAZ rejeita com 441 sem ele). */
   descricao: z.string().max(60).optional(),
   troco: z.coerce.number().nonnegative().optional(),
   cnpj_credenciadora: z.string().optional(),
   bandeira: z.string().optional(),
   autorizacao: z.string().optional(),
+}).refine((p) => p.forma === '90' || p.valor > 0, {
+  message: 'Valor do pagamento deve ser maior que zero (exceto forma 90 — sem pagamento)',
+  path: ['valor'],
 })
 
 const destinatarioOverrideSchema = z.object({
