@@ -17,6 +17,8 @@
 import QRCode from 'qrcode'
 import bwipjs from 'bwip-js'
 import { supabase } from '../supabase.js'
+import { baixarArquivoStorage } from './comprovantes.js'
+import { overlayDoXmlAutorizado } from './danfe-xml.js'
 
 export interface DanfeData {
   empresa: Record<string, unknown>
@@ -65,7 +67,40 @@ export async function carregarDadosDanfe(notaId: string): Promise<DanfeData> {
   const itensFinal = itens.length > 0 ? itens : itensFakeProporcionais(nota)
   const notaEnriquecida = itens.length > 0 ? nota : enriquecerNotaFake(nota, itensFinal)
 
-  return { empresa, cliente, nota: notaEnriquecida, itens: itensFinal }
+  const base: DanfeData = { empresa, cliente, nota: notaEnriquecida, itens: itensFinal }
+
+  // Nota autorizada: o XML manda. A DANFE é a representação gráfica dele, e
+  // as colunas do banco só cobrem os campos da venda comum — numa devolução
+  // faltavam natureza da operação, endereço do destinatário e ICMS/IPI.
+  return (await aplicarXmlAutorizado(base, nota.xml_proc_path)) ?? base
+}
+
+/**
+ * Sobrepõe os dados do XML autorizado. Se o XML não estiver no Storage ou não
+ * for legível, devolve null e a DANFE segue com o que veio do banco — vale
+ * imprimir algo desatualizado em vez de não imprimir nada.
+ */
+async function aplicarXmlAutorizado(
+  base: DanfeData,
+  xmlProcPath: unknown,
+): Promise<DanfeData | null> {
+  if (!xmlProcPath) return null
+  try {
+    const file = await baixarArquivoStorage('notas-xml', String(xmlProcPath))
+    if (!file) return null
+    const overlay = overlayDoXmlAutorizado(file.buffer.toString('utf-8'))
+    if (!overlay || overlay.itens.length === 0) return null
+    return {
+      empresa: base.empresa,
+      // O destinatário do XML é o que foi autorizado; o cadastro local pode
+      // ter mudado depois da emissão, e a DANFE tem que refletir a emissão.
+      cliente: { ...base.cliente, ...overlay.cliente },
+      nota: { ...base.nota, ...overlay.nota },
+      itens: overlay.itens,
+    }
+  } catch {
+    return null
+  }
 }
 
 const CATALOGO_TESTE = [

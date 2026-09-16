@@ -14,6 +14,7 @@
     "db:fiscal-padrao": "tsx scripts/aplicar-fiscal-padrao.ts",
     "spike:nfse": "tsx scripts/spike-nfse.ts",
     "preview:danfe": "tsx scripts/preview-danfe.ts",
+    "preview:danfe-xml": "tsx scripts/preview-danfe-do-xml.ts",
     "seed:teste": "tsx scripts/seed-teste.ts",
     "gerar:nota": "tsx scripts/gerar-nota-teste.ts",
     "spike:nfe": "tsx scripts/spike-nfe.ts",
