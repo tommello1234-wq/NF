@@ -146,6 +146,8 @@ export interface ItemProdutoInline {
   unidadeTributavel?: string
   gtin?: string
   origem?: number
+  /** nFCI — obrigatório em produto de origem 3/5/8 (conteúdo importado). */
+  fci?: string
   /** CSOSN (Simples) — ex '102' */
   cstCsosn?: string
   /** CST ICMS (Regime Normal) — ex '00' */

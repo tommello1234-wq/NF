@@ -438,6 +438,7 @@ async function carregarItens(
       valorTotal: +(valorUnit * quantidade).toFixed(2),
       gtin: p.gtin || 'SEM GTIN',
       origem: p.origem ?? 0,
+      fci: p.fci || undefined,
       // A escolha do código é DITADA PELO REGIME, não pela ordem dos campos:
       //  - Simples (CRT 1/4): CSOSN de 3 dígitos (102, 500…) → cst_csosn/csosn
       //  - Regime Normal (CRT 3): CST de 2 dígitos (00, 10, 20…) → cst_icms
@@ -513,6 +514,7 @@ function itemXmlDeInline(
     valorTotal: +(valorUnit * quantidade).toFixed(2),
     gtin: pr.gtin || 'SEM GTIN',
     origem: pr.origem ?? 0,
+    fci: pr.fci || undefined,
     // Mesma regra do caminho do banco: o regime da empresa decide CSOSN vs CST.
     // No Regime Normal cai no padrão da empresa antes do '00' genérico:
     // dizer '00' sem alíquota é declarar imposto zero num item tributado.

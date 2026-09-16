@@ -106,6 +106,8 @@ export interface ItemXml {
   valorTotal: number
   gtin: string             // 'SEM GTIN' se não tiver
   origem: number
+  /** nFCI — obrigatório quando origem é 3, 5 ou 8 (conteúdo importado). */
+  fci?: string
   cstCsosn: string
   aliquotaIcms?: number
   valorIcms?: number
@@ -344,8 +346,11 @@ function montarDet(item: ItemXml, ctx: BuildNfeInput) {
       cEAN: item.gtin || 'SEM GTIN',
       xProd: item.descricao,
       NCM: item.ncm,
-      ...(item.exTipi ? { EXTIPI: item.exTipi } : {}),
+      // Ordem do XSD: NCM → NVE → CEST → indEscala → CNPJFab → cBenef →
+      // EXTIPI → CFOP. Estava com CEST depois de EXTIPI, o que reprova no
+      // schema quando os dois aparecem juntos.
       ...(item.cest ? { CEST: item.cest } : {}),
+      ...(item.exTipi ? { EXTIPI: item.exTipi } : {}),
       CFOP: item.cfop,
       uCom: item.unidadeComercial,
       qCom: item.quantidadeComercial.toFixed(4),
@@ -357,6 +362,10 @@ function montarDet(item: ItemXml, ctx: BuildNfeInput) {
       vUnTrib,
       ...(item.valorDesconto ? { vDesc: item.valorDesconto.toFixed(2) } : {}),
       indTot: '1',
+      // FCI (Ficha de Conteúdo de Importação): obrigatória em produto com
+      // origem 3/5/8 (conteúdo importado). Vem na nota de compra e precisa
+      // ser repetida na devolução. Vai depois de indTot, como manda o XSD.
+      ...(item.fci ? { nFCI: item.fci } : {}),
     },
     imposto: montarImposto(item, interestadual, ctx.emit.crt),
     ...(item.infoAdicional ? { infAdProd: item.infoAdicional } : {}),

@@ -32,6 +32,8 @@ const produtoInlineSchema = z.object({
   unidade_tributavel: z.string().max(6).optional(),
   gtin: z.string().optional(),
   origem: z.coerce.number().int().min(0).max(8).optional(),
+  /** FCI — obrigatória em origem 3/5/8. Vem da nota de compra. */
+  fci: z.string().max(36).optional(),
   cst_csosn: z.string().optional(),
   cst_icms: z.string().optional(),
   aliquota_icms: z.coerce.number().nonnegative().optional(),
@@ -422,6 +424,7 @@ async function emitir(
               unidadeTributavel: i.produto.unidade_tributavel,
               gtin: i.produto.gtin,
               origem: i.produto.origem,
+              fci: i.produto.fci,
               cstCsosn: i.produto.cst_csosn,
               cstIcms: i.produto.cst_icms,
               aliquotaIcms: i.produto.aliquota_icms,
