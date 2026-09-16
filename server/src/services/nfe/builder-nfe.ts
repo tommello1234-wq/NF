@@ -335,6 +335,13 @@ function montarDet(item: ItemXml, ctx: BuildNfeInput) {
   const ufEmit = ctx.emit.endereco.uf
   const ufDest = ctx.dest?.endereco?.uf
   const interestadual = !!ufDest && ufDest !== ufEmit
+  // O grupo ICMSUFDest (partilha do ICMS interestadual, o "DIFAL") só cabe
+  // numa condição bem específica: venda interestadual PARA CONSUMIDOR FINAL
+  // NÃO CONTRIBUINTE do ICMS. Mandar fora disso é rejeição 695 — foi o que
+  // derrubou a primeira devolução, cujo destinatário é o fornecedor
+  // (contribuinte, indIEDest=1, e não consumidor final).
+  const aplicaDifal =
+    interestadual && ctx.consumidorFinal && ctx.dest?.indicadorIe === 9
   const uTrib = item.unidadeTributavel || item.unidadeComercial
   const qTrib = (item.quantidadeTributavel ?? item.quantidadeComercial).toFixed(4)
   const vUnTrib = (item.valorUnitarioTributavel ?? item.valorUnitario).toFixed(4)
@@ -367,7 +374,7 @@ function montarDet(item: ItemXml, ctx: BuildNfeInput) {
       // ser repetida na devolução. Vai depois de indTot, como manda o XSD.
       ...(item.fci ? { nFCI: item.fci } : {}),
     },
-    imposto: montarImposto(item, interestadual, ctx.emit.crt),
+    imposto: montarImposto(item, aplicaDifal, ctx.emit.crt),
     ...(item.infoAdicional ? { infAdProd: item.infoAdicional } : {}),
   }
 }
@@ -376,7 +383,7 @@ function montarDet(item: ItemXml, ctx: BuildNfeInput) {
  * Monta os impostos do item conforme o CRT da empresa e o CST/CSOSN do produto.
  * Hoje cobre o caso comum de ótica em Simples Nacional (CSOSN 102/103/300/400/500),
  * IPI quando o produto tem alíquota, PIS/COFINS NT (49) por padrão, e o grupo
- * ICMSUFDest pra venda interestadual a consumidor final.
+ * ICMSUFDest só pra venda interestadual a consumidor final NÃO contribuinte.
  */
 /**
  * Mapeia o CSOSN pro grupo XML correspondente (leiaute NF-e 4.00). Vários
@@ -393,7 +400,7 @@ function grupoIcmsSn(csosn: string): string {
   return 'ICMSSN900'
 }
 
-function montarImposto(item: ItemXml, interestadual: boolean, crt: 1 | 2 | 3 | 4 = 1) {
+function montarImposto(item: ItemXml, aplicaDifal: boolean, crt: 1 | 2 | 3 | 4 = 1) {
   const orig = String(item.origem)
   const code = item.cstCsosn
 
@@ -530,7 +537,7 @@ function montarImposto(item: ItemXml, interestadual: boolean, crt: 1 | 2 | 3 | 4
   imposto.PIS = { [grupoPis(item.cstPis)]: pisPayload(item) }
   imposto.COFINS = { [grupoCofins(item.cstCofins)]: cofinsPayload(item) }
 
-  if (interestadual && item.aliquotaIcms != null) {
+  if (aplicaDifal && item.aliquotaIcms != null) {
     imposto.ICMSUFDest = {
       vBCUFDest: item.valorTotal.toFixed(2),
       pFCPUFDest: '0.00',
