@@ -352,10 +352,13 @@ async function notaPertenceA(
  * própria empresa (a primeira ativa). Assim o ERP externo não precisa saber
  * uuids internos da API.
  */
-async function resolverNaturezaPadrao(empresaId: string): Promise<string> {
+async function resolverNaturezaPadrao(
+  empresaId: string,
+  tipoDocumento: string = 'venda',
+): Promise<string> {
   const { data } = await supabase
     .from('naturezas_operacao')
-    .select('id, nome, ativo')
+    .select('id, nome, finalidade, ativo')
     .eq('empresa_id', empresaId)
     .eq('ativo', true)
     .order('created_at', { ascending: true })
@@ -364,7 +367,26 @@ async function resolverNaturezaPadrao(empresaId: string): Promise<string> {
       'Empresa sem natureza de operação cadastrada — cadastre uma (ex: "Venda balcão" CFOP 5102) ou envie natureza_operacao_id',
     )
   }
-  // Prefere uma que pareça venda de balcão; senão, a primeira ativa.
+
+  // A natureza precisa combinar com o tipo do documento: uma devolução com a
+  // natureza "Venda balcão" sai com finalidade 1 (normal) e escreve "venda"
+  // no natOp de uma nota que é de devolução.
+  const finalidadeAlvo: Record<string, string> = {
+    devolucao: 'devolucao',
+    devolucao_xml: 'devolucao',
+    complementar: 'complementar',
+    ajuste: 'ajuste',
+  }
+  const alvo = finalidadeAlvo[tipoDocumento]
+  if (alvo) {
+    const casa = data.find((n) => String(n.finalidade || '') === alvo)
+    if (casa) return casa.id
+    throw new Error(
+      `Empresa sem natureza de operação com finalidade "${alvo}" — cadastre uma (ex: "Devolução de compra", CFOP 6202) ou envie natureza_operacao_id`,
+    )
+  }
+
+  // Venda: prefere uma que pareça venda de balcão; senão, a primeira ativa.
   const venda = data.find((n) => /balc|venda/i.test(String(n.nome || '')))
   return (venda || data[0]).id
 }
@@ -384,7 +406,8 @@ async function emitir(
         .send({ error: 'empresa_id não corresponde à empresa da API key' })
     }
     const empresaId = empresaIdDaChave
-    const naturezaId = body.natureza_operacao_id || (await resolverNaturezaPadrao(empresaId))
+    const naturezaId =
+      body.natureza_operacao_id || (await resolverNaturezaPadrao(empresaId, body.tipo_documento))
 
     const input: NfeInput = {
       empresaId,
