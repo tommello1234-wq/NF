@@ -3,6 +3,10 @@ import { z } from 'zod'
 import { supabase } from '../services/supabase.js'
 import { authAdmin } from '../middleware/authAdmin.js'
 import { cancelarNfse, emitirNfse } from '../services/nfse/orquestrador.js'
+import { carregarCertificado } from '../services/certificado.js'
+import { carregarMaterialPfx } from '../services/nfse/pfx-loader.js'
+import { criarMtlsAgent } from '../services/nfse/mtls-agent.js'
+import { getDanfsePdf } from '../services/nfse/nfse-client.js'
 
 const emitirSchema = z.object({
   empresa_id: z.string().uuid(),
@@ -172,5 +176,61 @@ export async function adminNfseRoutes(app: FastifyInstance) {
     reply.header('content-type', 'application/xml')
     reply.header('content-disposition', `attachment; filename="nfse-${nota.chave_acesso_nfse || req.params.id}.xml"`)
     return reply.send(buffer)
+  })
+
+  /**
+   * GET /admin/nfse/:id/danfse — DANFSe em PDF.
+   *
+   * É o documento que se manda pro cliente: o XML serve pra contabilidade, mas
+   * ninguém abre XML. O PDF vem pronto da SEFIN Nacional, então não montamos
+   * layout nenhum — só buscamos e repassamos.
+   *
+   * Passa pelo servidor porque o endpoint da SEFIN exige mTLS com o
+   * certificado A1 da empresa (sem ele responde 403), e o certificado nunca
+   * sai daqui.
+   */
+  app.get<{ Params: { id: string } }>('/nfse/:id/danfse', async (req, reply) => {
+    try {
+      const { data: nota } = await supabase
+        .from('notas_fiscais')
+        .select('empresa_id, chave_acesso_nfse, ambiente_nfse, status, numero_nfse')
+        .eq('id', req.params.id)
+        .eq('tipo', 'nfse')
+        .maybeSingle()
+      if (!nota) return reply.status(404).send({ error: 'NFS-e não encontrada' })
+      if (!nota.chave_acesso_nfse) {
+        return reply
+          .status(404)
+          .send({ error: 'Nota sem chave de acesso — a DANFSe só existe depois de autorizada' })
+      }
+
+      const cert = await carregarCertificado(nota.empresa_id)
+      if (!cert) return reply.status(400).send({ error: 'Certificado A1 não encontrado para a empresa' })
+
+      const pfx = carregarMaterialPfx(cert.pfxBuffer, cert.senha)
+      const agent = criarMtlsAgent(pfx, { insecureSkipServerVerify: true })
+      const res = await getDanfsePdf(
+        { agent, ambiente: (nota.ambiente_nfse || 2) as 1 | 2 },
+        nota.chave_acesso_nfse,
+      )
+
+      if (res.status !== 200 || !res.contentType.includes('pdf')) {
+        return reply.status(502).send({
+          error: 'SEFIN não devolveu o PDF',
+          status: res.status,
+          detalhe: res.buffer.toString('utf-8').slice(0, 300),
+        })
+      }
+
+      reply.header('content-type', 'application/pdf')
+      reply.header(
+        'content-disposition',
+        `attachment; filename="nfse-${nota.numero_nfse || nota.chave_acesso_nfse}.pdf"`,
+      )
+      return reply.send(res.buffer)
+    } catch (e) {
+      app.log.error({ err: e }, 'Erro ao baixar DANFSe')
+      return reply.status(500).send({ error: (e as Error).message })
+    }
   })
 }

@@ -56,6 +56,56 @@ export async function postEvento(
   })
 }
 
+/**
+ * Baixa a DANFSe em PDF — a representacao grafica da NFS-e, que e o que se
+ * manda pro cliente. O XML vale pra contabilidade; o PDF e o que a pessoa abre.
+ *
+ * O endpoint exige o mesmo mTLS da emissao (tentar sem certificado devolve
+ * 403), por isso passa pelo nosso servidor em vez de ser um link direto.
+ * Devolve o PDF cru — nao e JSON como os outros.
+ */
+export async function getDanfsePdf(
+  deps: ClientDeps,
+  chaveAcesso: string,
+): Promise<{ status: number; contentType: string; buffer: Buffer }> {
+  const url = `${sefinBase(deps.ambiente)}/danfse/${encodeURIComponent(chaveAcesso)}`
+  return doRequestBinary(deps.agent, 'GET', url, { accept: 'application/pdf' })
+}
+
+function doRequestBinary(
+  agent: https.Agent,
+  method: string,
+  url: string,
+  headers: Record<string, string>,
+): Promise<{ status: number; contentType: string; buffer: Buffer }> {
+  const u = new URL(url)
+  return new Promise((resolve, reject) => {
+    const req = https.request(
+      {
+        agent,
+        method,
+        host: u.hostname,
+        port: u.port || 443,
+        path: u.pathname + u.search,
+        headers,
+      },
+      (res) => {
+        const chunks: Buffer[] = []
+        res.on('data', (c) => chunks.push(c))
+        res.on('end', () =>
+          resolve({
+            status: res.statusCode || 0,
+            contentType: String(res.headers['content-type'] || ''),
+            buffer: Buffer.concat(chunks),
+          }),
+        )
+      },
+    )
+    req.on('error', reject)
+    req.end()
+  })
+}
+
 function doRequest(
   agent: https.Agent,
   method: string,

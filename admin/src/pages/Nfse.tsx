@@ -102,6 +102,8 @@ export default function Nfse() {
   })
 
   const [cancelando, setCancelando] = useState(false)
+  /** Id da nota cujo PDF está sendo buscado — a SEFIN leva alguns segundos. */
+  const [baixandoPdf, setBaixandoPdf] = useState<string | null>(null)
   const [showCancel, setShowCancel] = useState<Nfse | null>(null)
   const [cancelForm, setCancelForm] = useState<{ codigo_motivo: '1' | '2' | '9'; descricao_motivo: string }>({
     codigo_motivo: '1',
@@ -263,6 +265,22 @@ export default function Nfse() {
     }
   }
 
+  /**
+   * DANFSe em PDF — o que se manda pro cliente. Vem pronta da SEFIN; o nosso
+   * servidor só busca, porque o endpoint deles exige o certificado da empresa.
+   */
+  async function baixarDanfse(nota: Nfse) {
+    setBaixandoPdf(nota.id)
+    try {
+      const blob = await apiDownload(`/admin/nfse/${nota.id}/danfse`)
+      downloadBlob(blob, `nfse-${nota.numero_nfse || nota.chave_acesso_nfse || nota.id}.pdf`)
+    } catch (err) {
+      toast.error('Erro ao baixar o PDF', { description: (err as Error).message })
+    } finally {
+      setBaixandoPdf(null)
+    }
+  }
+
   const empresaSelecionada = empresaDetalhe
   const empresaIncompleta = empresaSelecionada && (
     !empresaSelecionada.inscricao_municipal ||
@@ -372,6 +390,14 @@ export default function Nfse() {
                     title="Download XML da NFS-e (resposta SEFIN)"
                   >
                     <Download size={12} /> NFS-e
+                  </button>
+                  <button
+                    onClick={() => baixarDanfse(nota)}
+                    disabled={!nota.chave_acesso_nfse || baixandoPdf === nota.id}
+                    className="mr-2 inline-flex items-center gap-1 rounded-lg border border-accent/30 px-3 py-1.5 text-xs font-medium text-accent hover:bg-accent/5 disabled:opacity-40"
+                    title="Baixar a DANFSe em PDF — é o documento que se manda pro cliente"
+                  >
+                    <Download size={12} /> {baixandoPdf === nota.id ? 'Gerando...' : 'PDF'}
                   </button>
                   {nota.status === 'autorizada' && (
                     <button
