@@ -4,6 +4,7 @@ import { Building2, ShieldCheck, CreditCard, FileSignature, FileText, LogOut, Pa
 import { supabase } from './lib/supabase'
 import { EmpresaProvider, useEmpresaAtual } from './lib/empresaContext'
 import Login from './pages/Login'
+import DefinirSenha from './pages/DefinirSenha'
 import Empresas from './pages/Empresas'
 import EmpresaDetalhe from './pages/EmpresaDetalhe'
 import Notas from './pages/Notas'
@@ -242,10 +243,64 @@ function SemEmpresa({ children, layout = true }: { children: React.ReactNode; la
   return <>{children}</>
 }
 
+/**
+ * O link de recuperação do Supabase volta como #access_token=...&type=recovery.
+ * Tem que ser lido AQUI, no carregamento do módulo, antes do React montar:
+ * RequireAuth e Login chamam getSession(), que ainda não resolveu, e mandam pra
+ * /login — e esse redirect apaga o fragmento junto com o token. Era por isso
+ * que clicar no e-mail de recuperação caía na tela de login vazia.
+ */
+const fragmentoInicial = typeof window !== 'undefined' ? window.location.hash : ''
+const chegouPorLinkDeEmail = fragmentoInicial.includes('access_token=')
+const ehRecuperacaoDeSenha = chegouPorLinkDeEmail && fragmentoInicial.includes('type=recovery')
+
 export default function App() {
+  const navigate = useNavigate()
+  // Segura a renderização das rotas enquanto o supabase-js monta a sessão a
+  // partir do fragmento. Sem isso o redirect acontece antes e o token se perde.
+  const [montandoSessao, setMontandoSessao] = useState(chegouPorLinkDeEmail)
+
+  useEffect(() => {
+    if (!chegouPorLinkDeEmail) return
+    let vivo = true
+    const concluir = (destino: string) => {
+      if (!vivo) return
+      vivo = false
+      setMontandoSessao(false)
+      navigate(destino, { replace: true })
+    }
+    const { data: listener } = supabase.auth.onAuthStateChange((_ev, session) => {
+      if (session) concluir(ehRecuperacaoDeSenha ? '/definir-senha' : '/selecionar-empresa')
+    })
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session) concluir(ehRecuperacaoDeSenha ? '/definir-senha' : '/selecionar-empresa')
+    })
+    // Link inválido/expirado não dispara evento nenhum — não deixa a tela presa.
+    const limite = setTimeout(() => {
+      if (vivo) {
+        vivo = false
+        setMontandoSessao(false)
+        navigate(ehRecuperacaoDeSenha ? '/definir-senha' : '/login', { replace: true })
+      }
+    }, 6000)
+    return () => {
+      listener.subscription.unsubscribe()
+      clearTimeout(limite)
+    }
+  }, [navigate])
+
+  if (montandoSessao) {
+    return (
+      <div className="flex h-screen items-center justify-center text-muted">
+        Validando o link...
+      </div>
+    )
+  }
+
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/definir-senha" element={<DefinirSenha />} />
       <Route
         path="/selecionar-empresa"
         element={
