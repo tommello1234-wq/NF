@@ -56,6 +56,7 @@ const empresaSchema = z.object({
   emite_nfe: z.boolean().optional(),
   usa_stripe: z.boolean().optional(),
   usa_ticto: z.boolean().optional(),
+  usa_asaas: z.boolean().optional(),
 })
 
 function cleanDoc(value?: string | null) {

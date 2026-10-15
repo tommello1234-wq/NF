@@ -35,6 +35,7 @@ export interface EmpresaCampos {
   // Integrações de pagamento online — independentes do tipo de nota emitida.
   usa_stripe?: boolean | null
   usa_ticto?: boolean | null
+  usa_asaas?: boolean | null
 }
 
 export interface CampoPendente {

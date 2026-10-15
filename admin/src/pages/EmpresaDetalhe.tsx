@@ -65,6 +65,7 @@ interface Empresa {
   emite_nfe?: boolean | null
   usa_stripe?: boolean | null
   usa_ticto?: boolean | null
+  usa_asaas?: boolean | null
 }
 
 interface CertStatus {
@@ -140,6 +141,7 @@ const emptyForm = {
   emite_nfe: false,
   usa_stripe: false,
   usa_ticto: false,
+  usa_asaas: false,
 }
 
 function onlyDigits(value: string) {
@@ -201,6 +203,7 @@ function toForm(empresa: Empresa) {
     emite_nfe: Boolean(empresa.emite_nfe),
     usa_stripe: Boolean(empresa.usa_stripe),
     usa_ticto: Boolean(empresa.usa_ticto),
+    usa_asaas: Boolean(empresa.usa_asaas),
   }
 }
 
@@ -469,7 +472,7 @@ export default function EmpresaDetalhe() {
               <span><strong>NF-e / NFC-e</strong> <span className="text-muted">— mercadoria (ICMS, NCM/CFOP)</span></span>
             </label>
           </div>
-          {(form.emite_nfse || form.usa_stripe || form.usa_ticto) && (
+          {(form.emite_nfse || form.usa_stripe || form.usa_ticto || form.usa_asaas) && (
           <div className="mt-3 border-t border-black/[0.06] pt-3">
             <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-dark">Integrações de pagamento</div>
             <div className="flex flex-wrap gap-4">
@@ -490,6 +493,15 @@ export default function EmpresaDetalhe() {
                   className="h-4 w-4"
                 />
                 <span><strong>Ticto</strong> <span className="text-muted">— marketplace digital</span></span>
+              </label>
+              <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-black/[0.08] bg-white px-3 py-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={form.usa_asaas}
+                  onChange={(event) => setForm((current) => ({ ...current, usa_asaas: event.target.checked }))}
+                  className="h-4 w-4"
+                />
+                <span><strong>Asaas</strong> <span className="text-muted">— cobranças (PIX, boleto, cartão)</span></span>
               </label>
             </div>
           </div>

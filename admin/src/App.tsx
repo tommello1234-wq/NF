@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Routes, Route, Link, Navigate, useNavigate, useLocation } from 'react-router-dom'
-import { Building2, ShieldCheck, CreditCard, FileSignature, FileText, LogOut, Package, Plug, ReceiptText, Repeat, Settings2, ShoppingCart, Users } from 'lucide-react'
+import { Building2, ShieldCheck, CreditCard, Landmark, FileSignature, FileText, LogOut, Package, Plug, ReceiptText, Repeat, Settings2, ShoppingCart, Users } from 'lucide-react'
 import { supabase } from './lib/supabase'
 import { EmpresaProvider, useEmpresaAtual } from './lib/empresaContext'
 import Login from './pages/Login'
@@ -17,6 +17,7 @@ import Darfs from './pages/Darfs'
 import Fiscal from './pages/Fiscal'
 import IntegracoesTicto from './pages/IntegracoesTicto'
 import IntegracoesStripe from './pages/IntegracoesStripe'
+import IntegracoesAsaas from './pages/IntegracoesAsaas'
 import SelecionarEmpresa from './pages/SelecionarEmpresa'
 
 function Layout({ children }: { children: React.ReactNode }) {
@@ -41,6 +42,7 @@ function Layout({ children }: { children: React.ReactNode }) {
   const emiteNfe = empresaAtual?.emite_nfe === true
   const usaStripe = empresaAtual?.usa_stripe === true
   const usaTicto = empresaAtual?.usa_ticto === true
+  const usaAsaas = empresaAtual?.usa_asaas === true
 
   const nav = [
     { to: '/empresas', label: 'Empresas', icon: Building2, show: true },
@@ -52,6 +54,7 @@ function Layout({ children }: { children: React.ReactNode }) {
     { to: '/nfe', label: 'NF-e / NFC-e', icon: FileText, show: emiteNfe },
     { to: '/integracoes/ticto', label: 'Integração Ticto', icon: Plug, show: usaTicto },
     { to: '/integracoes/stripe', label: 'Integração Stripe', icon: CreditCard, show: usaStripe },
+    { to: '/integracoes/asaas', label: 'Integração Asaas', icon: Landmark, show: usaAsaas },
     { to: '/notas', label: 'Notas (legado)', icon: FileText, show: true },
     { to: '/darfs', label: 'DARF', icon: ReceiptText, show: true },
   ].filter((item) => item.show)
@@ -340,6 +343,7 @@ export default function App() {
       <Route path="/nfe" element={<RequireAuth><RequireEmpresa><Nfe /></RequireEmpresa></RequireAuth>} />
       <Route path="/integracoes/ticto" element={<RequireAuth><RequireEmpresa><IntegracoesTicto /></RequireEmpresa></RequireAuth>} />
       <Route path="/integracoes/stripe" element={<RequireAuth><RequireEmpresa><IntegracoesStripe /></RequireEmpresa></RequireAuth>} />
+      <Route path="/integracoes/asaas" element={<RequireAuth><RequireEmpresa><IntegracoesAsaas /></RequireEmpresa></RequireAuth>} />
       <Route path="/darfs" element={<RequireAuth><RequireEmpresa><Darfs /></RequireEmpresa></RequireAuth>} />
       <Route path="*" element={<Navigate to="/selecionar-empresa" replace />} />
     </Routes>
