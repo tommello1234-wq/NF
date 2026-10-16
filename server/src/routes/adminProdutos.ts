@@ -382,11 +382,17 @@ export async function adminProdutosRoutes(app: FastifyInstance) {
     }
     const { ids, acao } = parsed.data
 
+    // Só toca registros das empresas desta conta. Antes, uma lista de ids de
+    // outra empresa era ativada, arquivada ou REMOVIDA sem conferência.
+    const permitidas = [...(req.empresasPermitidas ?? new Set<string>())]
+    if (permitidas.length === 0) return reply.status(403).send({ error: 'Sem acesso a nenhuma empresa' })
+
     // Pega empresa_id de 1 produto. Evita SELECT em massa que estoura URL.
     const { data: amostra, error: amErr } = await supabase
       .from('produtos')
       .select('empresa_id')
       .eq('id', ids[0])
+      .in('empresa_id', permitidas)
       .maybeSingle()
     if (amErr || !amostra) {
       return reply.status(404).send({ error: 'Nenhum produto encontrado para esses IDs' })
@@ -407,13 +413,13 @@ export async function adminProdutosRoutes(app: FastifyInstance) {
       const slice = ids.slice(i, i + CHUNK)
       try {
         if (acao === 'remover') {
-          const { error } = await supabase.from('produtos').delete().in('id', slice)
+          const { data: afetados, error } = await supabase.from('produtos').delete().in('id', slice).in('empresa_id', permitidas).select('id')
           if (error) throw new Error(error.message)
-          sucesso += slice.length
+          sucesso += afetados?.length ?? 0
         } else {
-          const { error } = await supabase.from('produtos').update(update!).in('id', slice)
+          const { data: afetados, error } = await supabase.from('produtos').update(update!).in('id', slice).in('empresa_id', permitidas).select('id')
           if (error) throw new Error(error.message)
-          sucesso += slice.length
+          sucesso += afetados?.length ?? 0
         }
       } catch (e) {
         void e
@@ -421,11 +427,13 @@ export async function adminProdutosRoutes(app: FastifyInstance) {
         for (const id of slice) {
           try {
             if (acao === 'remover') {
-              const r = await supabase.from('produtos').delete().eq('id', id)
+              const r = await supabase.from('produtos').delete().eq('id', id).in('empresa_id', permitidas).select('id')
               if (r.error) throw new Error(r.error.message)
+              if (!r.data?.length) throw new Error('Não encontrado ou sem acesso')
             } else {
-              const r = await supabase.from('produtos').update(update!).eq('id', id)
+              const r = await supabase.from('produtos').update(update!).eq('id', id).in('empresa_id', permitidas).select('id')
               if (r.error) throw new Error(r.error.message)
+              if (!r.data?.length) throw new Error('Não encontrado ou sem acesso')
             }
             sucesso++
           } catch (e2) {

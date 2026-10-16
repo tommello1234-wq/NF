@@ -110,9 +110,10 @@ export default function Nfse() {
     descricao_motivo: '',
   })
 
+  // Recarrega ao trocar de empresa — a lista é da empresa ativa.
   useEffect(() => {
     loadNotas()
-  }, [])
+  }, [empresaId])
 
   useEffect(() => {
     if (!empresaId) {
@@ -141,7 +142,13 @@ export default function Nfse() {
   async function loadNotas() {
     setLoading(true)
     try {
-      setNotas(await apiGet<Nfse[]>('/admin/nfse'))
+      // Pede só as da empresa ativa. Antes vinha a lista de TODAS as empresas
+      // e o filtro era feito aqui no navegador — os dados já tinham vazado.
+      if (!empresaId) {
+        setNotas([])
+        return
+      }
+      setNotas(await apiGet<Nfse[]>(`/admin/nfse?empresa_id=${empresaId}`))
     } catch (err) {
       toast.error('Erro ao buscar notas', { description: (err as Error).message })
     } finally {

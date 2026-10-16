@@ -262,12 +262,18 @@ export async function adminClientesRoutes(app: FastifyInstance) {
     }
     const { ids, acao } = parsed.data
 
+    // Só toca registros das empresas desta conta. Antes, uma lista de ids de
+    // outra empresa era ativada, arquivada ou REMOVIDA sem conferência.
+    const permitidas = [...(req.empresasPermitidas ?? new Set<string>())]
+    if (permitidas.length === 0) return reply.status(403).send({ error: 'Sem acesso a nenhuma empresa' })
+
     // Pega empresa_id de UM cliente (suficiente pro log). Evita SELECT massivo
     // que estouraria o limite de URL do PostgREST com 1000+ UUIDs.
     const { data: amostra, error: amErr } = await supabase
       .from('clientes')
       .select('empresa_id')
       .eq('id', ids[0])
+      .in('empresa_id', permitidas)
       .maybeSingle()
     if (amErr || !amostra) {
       return reply.status(404).send({ error: 'Nenhum cliente encontrado com os IDs informados' })
@@ -289,13 +295,13 @@ export async function adminClientesRoutes(app: FastifyInstance) {
       const slice = ids.slice(i, i + CHUNK)
       try {
         if (acao === 'remover') {
-          const { error } = await supabase.from('clientes').delete().in('id', slice)
+          const { data: afetados, error } = await supabase.from('clientes').delete().in('id', slice).in('empresa_id', permitidas).select('id')
           if (error) throw new Error(error.message)
-          sucesso += slice.length
+          sucesso += afetados?.length ?? 0
         } else {
-          const { error } = await supabase.from('clientes').update(update!).in('id', slice)
+          const { data: afetados, error } = await supabase.from('clientes').update(update!).in('id', slice).in('empresa_id', permitidas).select('id')
           if (error) throw new Error(error.message)
-          sucesso += slice.length
+          sucesso += afetados?.length ?? 0
         }
       } catch (e) {
         void e
@@ -303,11 +309,13 @@ export async function adminClientesRoutes(app: FastifyInstance) {
         for (const id of slice) {
           try {
             if (acao === 'remover') {
-              const r = await supabase.from('clientes').delete().eq('id', id)
+              const r = await supabase.from('clientes').delete().eq('id', id).in('empresa_id', permitidas).select('id')
               if (r.error) throw new Error(r.error.message)
+              if (!r.data?.length) throw new Error('Não encontrado ou sem acesso')
             } else {
-              const r = await supabase.from('clientes').update(update!).eq('id', id)
+              const r = await supabase.from('clientes').update(update!).eq('id', id).in('empresa_id', permitidas).select('id')
               if (r.error) throw new Error(r.error.message)
+              if (!r.data?.length) throw new Error('Não encontrado ou sem acesso')
             }
             sucesso++
           } catch (e2) {

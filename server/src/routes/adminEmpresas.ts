@@ -76,28 +76,18 @@ function cleanEmptyStrings<T extends Record<string, unknown>>(payload: T) {
 export async function adminEmpresasRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authAdmin)
 
-  /** GET /admin/empresas — lista empresas visíveis pro usuário logado.
-   *  Se o usuário tem linhas em usuario_empresas → só essas.
-   *  Se não tem nenhuma → vê todas (superadmin / conta antiga). */
+  /** GET /admin/empresas — só as empresas vinculadas à conta.
+   *
+   *  Antes, conta sem vínculo nenhum via TODAS (era a regra "superadmin"). Foi
+   *  assim que uma conta nova da UPWARD passou a enxergar as óticas, e que um
+   *  `admin@admin.com` sem dono via tudo. Sem vínculo agora é sem acesso. */
   app.get('/empresas', async (req) => {
-    const userId = req.adminUserId!
-    const { data: acessos } = await supabase
-      .from('usuario_empresas')
-      .select('empresa_id')
-      .eq('user_id', userId)
-    if (acessos && acessos.length > 0) {
-      const ids = acessos.map((a) => a.empresa_id)
-      const { data } = await supabase
-        .from('empresas')
-        .select('*')
-        .in('id', ids)
-        .order('nome')
-      return data || []
-    }
-    // Sem restrição — superadmin vê tudo
+    const ids = [...(req.empresasPermitidas ?? new Set<string>())]
+    if (ids.length === 0) return []
     const { data } = await supabase
       .from('empresas')
       .select('*')
+      .in('id', ids)
       .order('nome')
     return data || []
   })
@@ -132,6 +122,13 @@ export async function adminEmpresasRoutes(app: FastifyInstance) {
       .select()
       .single()
     if (error) return reply.status(500).send({ error: error.message })
+
+    // Quem cria é vinculado à empresa criada — sem isso ela some da lista dele
+    // no mesmo instante (o painel só mostra empresas vinculadas).
+    const { error: vincErr } = await supabase
+      .from('usuario_empresas')
+      .insert({ user_id: req.adminUserId!, empresa_id: data.id })
+    if (vincErr) req.log.error({ err: vincErr }, 'Empresa criada, mas o vínculo com o criador falhou')
     return data
   })
 

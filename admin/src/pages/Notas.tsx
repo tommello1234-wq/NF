@@ -112,9 +112,10 @@ export default function Notas() {
     valor_total: 100,
   })
 
+  // Recarrega ao trocar de empresa — a lista é da empresa ativa.
   useEffect(() => {
     loadNotas()
-  }, [])
+  }, [empresaId])
 
   useEffect(() => {
     if (!empresaId) {
@@ -210,7 +211,13 @@ export default function Notas() {
   async function loadNotas() {
     setLoading(true)
     try {
-      setNotas(await apiGet<Nota[]>('/admin/notas'))
+      // Pede só as da empresa ativa. Antes vinha a lista de TODAS as empresas
+      // e o filtro era feito aqui no navegador — os dados já tinham vazado.
+      if (!empresaId) {
+        setNotas([])
+        return
+      }
+      setNotas(await apiGet<Nota[]>(`/admin/notas?empresa_id=${empresaId}`))
     } catch (err) {
       toast.error('Erro ao buscar notas', { description: (err as Error).message })
     } finally {
