@@ -77,7 +77,10 @@ export async function reemitirEventoStripe(eventoId: string): Promise<ReemitirRe
               ...(invoice.customer_tax_ids || []),
               doc.cpf ? { type: 'br_cpf', value: doc.cpf } : { type: 'br_cnpj', value: doc.cnpj! },
             ],
-            customer_name: invoice.customer_name || doc.nome || undefined,
+            // Com CNPJ a nota tem que sair no nome da EMPRESA. O nome no Stripe é o
+            // do dono do cartão; no doc guardado está a razão social da Receita.
+            customer_name:
+              (!doc.cpf && doc.cnpj && doc.nome) || invoice.customer_name || doc.nome || undefined,
             customer_email: invoice.customer_email || doc.email || undefined,
           }
           try {
