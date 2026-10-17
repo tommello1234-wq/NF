@@ -90,6 +90,20 @@ export async function listarCobrancasPorStatus(
   return todas
 }
 
+/** Todos os clientes da conta (id → cadastro), paginando a API. */
+export async function listarClientes(apiKey: string): Promise<Map<string, AsaasCustomer>> {
+  const porId = new Map<string, AsaasCustomer>()
+  for (let offset = 0; offset < 50_000; offset += 100) {
+    const r = await get<{ data?: AsaasCustomer[]; hasMore?: boolean }>(
+      apiKey,
+      `/customers?limit=100&offset=${offset}`,
+    )
+    for (const c of r.data || []) porId.set(c.id, c)
+    if (!r.hasMore) break
+  }
+  return porId
+}
+
 /** Todas as parcelas de um parcelamento — pra saber se o estorno foi total. */
 export async function listarParcelas(apiKey: string, installmentId: string): Promise<AsaasPayment[]> {
   const r = await get<{ data?: AsaasPayment[] }>(

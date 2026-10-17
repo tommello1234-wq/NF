@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify'
 import { supabase } from '../services/supabase.js'
 import { authAdmin } from '../middleware/authAdmin.js'
 import { decryptSecret, encryptSecret } from '../services/crypto-utils.js'
-import { AsaasApiError, ehChaveSandbox, listarCobrancasPorStatus, validarChave } from '../services/webhooks/asaas-client.js'
+import { AsaasApiError, ehChaveSandbox, listarClientes, listarCobrancasPorStatus, validarChave } from '../services/webhooks/asaas-client.js'
 import { chaveEmissao, type AsaasPayment } from '../services/webhooks/asaas-types.js'
 import { reprocessarEventoAsaas } from '../services/webhooks/asaas-processar.js'
 
@@ -168,11 +168,14 @@ export async function adminAsaasRoutes(app: FastifyInstance) {
     const apiKey = decryptSecret(empresa.asaas_api_key_cifrado)
 
     let cobrancas: AsaasPayment[]
+    let clientes: Awaited<ReturnType<typeof listarClientes>>
     try {
-      const [recebidas, confirmadas] = await Promise.all([
+      const [recebidas, confirmadas, cadastro] = await Promise.all([
         listarCobrancasPorStatus(apiKey, 'RECEIVED'),
         listarCobrancasPorStatus(apiKey, 'CONFIRMED'),
+        listarClientes(apiKey),
       ])
+      clientes = cadastro
       const porId = new Map<string, AsaasPayment>()
       for (const c of [...recebidas, ...confirmadas]) porId.set(c.id, c)
       cobrancas = [...porId.values()]
@@ -194,7 +197,18 @@ export async function adminAsaasRoutes(app: FastifyInstance) {
 
     const vendas = new Map<
       string,
-      { chave: string; data: string; valor: number; forma: string; cliente: string; descricao: string; cobrancas: number }
+      {
+        chave: string
+        data: string
+        valor: number
+        forma: string
+        cliente: string
+        cliente_nome: string
+        /** PF ou PJ — o número do documento fica no Asaas, não sai daqui. */
+        cliente_tipo: 'PF' | 'PJ' | '?'
+        descricao: string
+        cobrancas: number
+      }
     >()
     for (const c of cobrancas) {
       const chave = chaveEmissao(c)
@@ -205,6 +219,10 @@ export async function adminAsaasRoutes(app: FastifyInstance) {
         valor: 0,
         forma: c.billingType || '?',
         cliente: c.customer,
+        cliente_nome: (clientes.get(c.customer)?.name || '').trim(),
+        cliente_tipo: ((d) => (d.length === 11 ? 'PF' : d.length === 14 ? 'PJ' : '?'))(
+          (clientes.get(c.customer)?.cpfCnpj || '').replace(/\D/g, ''),
+        ),
         descricao: (c.description || '').replace(/^Parcela \d+ de \d+\.?\s*/i, '').slice(0, 120),
         cobrancas: 0,
       }
