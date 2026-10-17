@@ -285,7 +285,11 @@ export async function cancelarPorEstornoAsaas(
       notaStatus: result.status,
       // Recusa típica: prazo de cancelamento da prefeitura já passou. A nota
       // continua autorizada — o orquestrador não mexe no status quando recusa.
-      erro: cancelada ? undefined : result.erros?.map((e) => `[${e.codigo}] ${e.descricao}`).join(' | ') || 'Cancelamento recusado',
+      erro: cancelada
+        ? undefined
+        : result.erros?.map((e) => `[${e.codigo}] ${e.descricao}`).join(' | ') ||
+          // Sem lista de erros (ex.: 500 da SEFIN), o status e o corpo são a única pista.
+          `Cancelamento recusado (HTTP ${result.rawStatus}: ${String(result.rawResponse || '').slice(0, 150)})`,
     })
   } catch (e) {
     return fecharEvento(eventoId, erro((e as Error).message))

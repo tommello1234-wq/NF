@@ -40,8 +40,14 @@ export async function getConvenioMunicipio(deps: ClientDeps, codigoIbge: string)
 
 /**
  * Posta um pedido de registro de evento (cancelamento, etc.) pra NFS-e.
- * Body do POST tem o mesmo shape de emissão: { dpsXmlGZipB64: '...' } com
- * o XML do pedRegEvento já comprimido (GZip+Base64).
+ *
+ * O campo do corpo é `pedidoRegistroEventoXmlGZipB64` — NÃO o
+ * `dpsXmlGZipB64` da emissão. Mandar o da emissão faz a SEFIN responder
+ * `500 {"message":"An error has occurred."}`, sem lista de erros, o que
+ * parece instabilidade dela. Foi assim até 17/10/2026: nenhum cancelamento
+ * de NFS-e tinha funcionado (botão do painel, estorno da Ticto e do Asaas),
+ * e o primeiro estorno real expôs. O XML do pedRegEvento já estava certo —
+ * valida no XSD oficial v1.01.
  */
 export async function postEvento(
   deps: ClientDeps,
@@ -49,7 +55,7 @@ export async function postEvento(
   eventoGzipBase64: string
 ): Promise<NfseResponse> {
   const url = `${sefinBase(deps.ambiente)}/nfse/${encodeURIComponent(chaveAcesso)}/eventos`
-  const body = JSON.stringify({ dpsXmlGZipB64: eventoGzipBase64 })
+  const body = JSON.stringify({ pedidoRegistroEventoXmlGZipB64: eventoGzipBase64 })
   return doRequest(deps.agent, 'POST', url, body, {
     'content-type': 'application/json',
     accept: 'application/json',
