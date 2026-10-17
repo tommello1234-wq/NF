@@ -70,6 +70,26 @@ export function buscarParcelamento(apiKey: string, installmentId: string): Promi
   return get<AsaasInstallment>(apiKey, `/installments/${encodeURIComponent(installmentId)}`)
 }
 
+/**
+ * Todas as cobranças com um status, paginando a API (máx. 100 por página).
+ * A ordem da API é estável, ao contrário da lista da tela do Asaas.
+ */
+export async function listarCobrancasPorStatus(
+  apiKey: string,
+  status: 'RECEIVED' | 'CONFIRMED',
+): Promise<AsaasPayment[]> {
+  const todas: AsaasPayment[] = []
+  for (let offset = 0; offset < 50_000; offset += 100) {
+    const r = await get<{ data?: AsaasPayment[]; hasMore?: boolean }>(
+      apiKey,
+      `/payments?status=${status}&limit=100&offset=${offset}`,
+    )
+    todas.push(...(r.data || []))
+    if (!r.hasMore) break
+  }
+  return todas
+}
+
 /** Todas as parcelas de um parcelamento — pra saber se o estorno foi total. */
 export async function listarParcelas(apiKey: string, installmentId: string): Promise<AsaasPayment[]> {
   const r = await get<{ data?: AsaasPayment[] }>(

@@ -3,7 +3,8 @@ import type { FastifyInstance } from 'fastify'
 import { supabase } from '../services/supabase.js'
 import { authAdmin } from '../middleware/authAdmin.js'
 import { decryptSecret, encryptSecret } from '../services/crypto-utils.js'
-import { AsaasApiError, ehChaveSandbox, validarChave } from '../services/webhooks/asaas-client.js'
+import { AsaasApiError, ehChaveSandbox, listarCobrancasPorStatus, validarChave } from '../services/webhooks/asaas-client.js'
+import { chaveEmissao, type AsaasPayment } from '../services/webhooks/asaas-types.js'
 import { reprocessarEventoAsaas } from '../services/webhooks/asaas-processar.js'
 
 export async function adminAsaasRoutes(app: FastifyInstance) {
@@ -142,6 +143,99 @@ export async function adminAsaasRoutes(app: FastifyInstance) {
       return { ok: true, configurado: true, produto_id: produtoId }
     },
   )
+
+
+  /**
+   * GET /admin/empresas/:empresaId/asaas/sem-nota
+   *
+   * Vendas pagas no Asaas que não passaram pela integração — ou seja, sem
+   * NFS-e emitida por ela. Só leitura. Serve pra dimensionar o passivo (o
+   * contador decide o que fazer) e é a lista que um backfill vai percorrer.
+   *
+   * Uma venda = uma chave de emissão: parcelamento conta uma vez, pelo total
+   * pago, na data da primeira parcela confirmada. Notas emitidas à mão (fora
+   * da integração) não têm como ser cruzadas aqui e aparecem como pendentes.
+   */
+  app.get<{ Params: { empresaId: string } }>('/empresas/:empresaId/asaas/sem-nota', async (req, reply) => {
+    const { data: empresa } = await supabase
+      .from('empresas')
+      .select('asaas_api_key_cifrado')
+      .eq('id', req.params.empresaId)
+      .maybeSingle()
+    if (!empresa?.asaas_api_key_cifrado) {
+      return reply.status(400).send({ error: 'Chave da API do Asaas não configurada' })
+    }
+    const apiKey = decryptSecret(empresa.asaas_api_key_cifrado)
+
+    let cobrancas: AsaasPayment[]
+    try {
+      const [recebidas, confirmadas] = await Promise.all([
+        listarCobrancasPorStatus(apiKey, 'RECEIVED'),
+        listarCobrancasPorStatus(apiKey, 'CONFIRMED'),
+      ])
+      const porId = new Map<string, AsaasPayment>()
+      for (const c of [...recebidas, ...confirmadas]) porId.set(c.id, c)
+      cobrancas = [...porId.values()]
+    } catch (e) {
+      return reply.status(502).send({ error: (e as Error).message })
+    }
+
+    // Vendas que a integração já processou (com nota emitida).
+    const { data: processadas } = await supabase
+      .from('webhook_events')
+      .select('external_id')
+      .eq('provider', 'asaas')
+      .eq('empresa_id', req.params.empresaId)
+      .not('nota_fiscal_id', 'is', null)
+    const comNota = new Set((processadas || []).map((e) => e.external_id as string))
+
+    const dataDaVenda = (c: AsaasPayment) =>
+      (c.confirmedDate || c.paymentDate || c.clientPaymentDate || c.dateCreated || '').slice(0, 10)
+
+    const vendas = new Map<
+      string,
+      { chave: string; data: string; valor: number; forma: string; cliente: string; descricao: string; cobrancas: number }
+    >()
+    for (const c of cobrancas) {
+      const chave = chaveEmissao(c)
+      if (comNota.has(chave)) continue
+      const v = vendas.get(chave) || {
+        chave,
+        data: dataDaVenda(c),
+        valor: 0,
+        forma: c.billingType || '?',
+        cliente: c.customer,
+        descricao: (c.description || '').replace(/^Parcela \d+ de \d+\.?\s*/i, '').slice(0, 120),
+        cobrancas: 0,
+      }
+      v.valor = Math.round((v.valor + Number(c.value || 0)) * 100) / 100
+      v.cobrancas++
+      const d = dataDaVenda(c)
+      if (d && (!v.data || d < v.data)) v.data = d
+      vendas.set(chave, v)
+    }
+
+    const lista = [...vendas.values()].sort((a, b) => a.data.localeCompare(b.data))
+    const porMes: Record<string, { vendas: number; valor: number }> = {}
+    const porForma: Record<string, number> = {}
+    for (const v of lista) {
+      const m = v.data.slice(0, 7) || '?'
+      porMes[m] = porMes[m] || { vendas: 0, valor: 0 }
+      porMes[m].vendas++
+      porMes[m].valor = Math.round((porMes[m].valor + v.valor) * 100) / 100
+      porForma[v.forma] = (porForma[v.forma] || 0) + 1
+    }
+    return {
+      cobrancas_pagas_no_asaas: cobrancas.length,
+      vendas_com_nota_pela_integracao: comNota.size,
+      vendas_sem_nota: lista.length,
+      valor_sem_nota: Math.round(lista.reduce((s, v) => s + v.valor, 0) * 100) / 100,
+      parceladas: lista.filter((v) => v.chave.startsWith('parcelamento:')).length,
+      por_mes: porMes,
+      por_forma: porForma,
+      vendas: lista,
+    }
+  })
 
   /**
    * POST /admin/asaas/webhook-events/:id/reprocessar
