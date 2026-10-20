@@ -331,6 +331,25 @@ function montarDest(d: DestinatarioXml) {
   }
 }
 
+// xProd na SEFAZ: 1-120 chars, so caracteres ate U+00FF, sem espacos nas pontas
+// nem duplos (rejeicao 225). Troca o que nao cabe por equivalente simples.
+export function sanitizarXProd(valor: unknown): string {
+  const limpo = String(valor ?? '')
+    .normalize('NFC')
+    .replace(/[‐-―−]/g, '-')
+    .replace(/[‘’′]/g, "'")
+    .replace(/[“”″]/g, '"')
+    .replace(/[•·]/g, '.')
+    .replace(/…/g, '...')
+    .replace(/[^\x20-\xFF]/g, ' ')
+    .replace(/[\x7F-\x9F]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120)
+    .trim()
+  return limpo || 'PRODUTO'
+}
+
 function montarDet(item: ItemXml, ctx: BuildNfeInput) {
   const ufEmit = ctx.emit.endereco.uf
   const ufDest = ctx.dest?.endereco?.uf
@@ -351,7 +370,7 @@ function montarDet(item: ItemXml, ctx: BuildNfeInput) {
     prod: {
       cProd: item.codigo,
       cEAN: item.gtin || 'SEM GTIN',
-      xProd: item.descricao,
+      xProd: sanitizarXProd(item.descricao),
       NCM: item.ncm,
       // Ordem do XSD: NCM → NVE → CEST → indEscala → CNPJFab → cBenef →
       // EXTIPI → CFOP. Estava com CEST depois de EXTIPI, o que reprova no

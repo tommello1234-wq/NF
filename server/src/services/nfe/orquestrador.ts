@@ -16,7 +16,7 @@
 import { supabase } from '../supabase.js'
 import { carregarCertificado } from '../certificado.js'
 import { gerarChaveAcesso } from './chave-acesso.js'
-import { buildNfeXml, type BuildNfeInput, type ItemXml } from './builder-nfe.js'
+import { buildNfeXml, sanitizarXProd, type BuildNfeInput, type ItemXml } from './builder-nfe.js'
 import { buildNfceXml } from './builder-nfce.js'
 import { assinarXmlNfe, carregarMaterialPfxNfe } from './signer.js'
 import {
@@ -502,7 +502,7 @@ function itemXmlDeInline(
   return {
     numero: idx + 1,
     codigo: pr.codigo || `ITEM${idx + 1}`,
-    descricao: pr.descricao.slice(0, 120),
+    descricao: sanitizarXProd(pr.descricao),
     ncm,
     cest: pr.cest || undefined,
     cfop: it.cfop || pr.cfop || '5102',
