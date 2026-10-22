@@ -3,9 +3,9 @@ import type { FastifyInstance } from 'fastify'
 import { supabase } from '../services/supabase.js'
 import { authAdmin } from '../middleware/authAdmin.js'
 import { decryptSecret, encryptSecret } from '../services/crypto-utils.js'
-import { AsaasApiError, ehChaveSandbox, listarClientes, listarCobrancasPorStatus, validarChave } from '../services/webhooks/asaas-client.js'
+import { AsaasApiError, buscarPagamento, ehChaveSandbox, listarClientes, listarCobrancasPorStatus, validarChave } from '../services/webhooks/asaas-client.js'
 import { chaveEmissao, type AsaasPayment } from '../services/webhooks/asaas-types.js'
-import { reprocessarEventoAsaas } from '../services/webhooks/asaas-processar.js'
+import { emitirPorPagamentoAsaas, reprocessarEventoAsaas } from '../services/webhooks/asaas-processar.js'
 
 export async function adminAsaasRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authAdmin)
@@ -156,7 +156,10 @@ export async function adminAsaasRoutes(app: FastifyInstance) {
    * pago, na data da primeira parcela confirmada. Notas emitidas à mão (fora
    * da integração) não têm como ser cruzadas aqui e aparecem como pendentes.
    */
-  app.get<{ Params: { empresaId: string } }>('/empresas/:empresaId/asaas/sem-nota', async (req, reply) => {
+  app.get<{ Params: { empresaId: string }; Querystring: { nomes?: string } }>('/empresas/:empresaId/asaas/sem-nota', async (req, reply) => {
+    // Os nomes exigem baixar o cadastro inteiro de clientes, que é a parte
+    // lenta. Pra dimensionar ou montar um lote não são necessários.
+    const comNomes = req.query.nomes === '1'
     const { data: empresa } = await supabase
       .from('empresas')
       .select('asaas_api_key_cifrado')
@@ -173,7 +176,7 @@ export async function adminAsaasRoutes(app: FastifyInstance) {
       const [recebidas, confirmadas, cadastro] = await Promise.all([
         listarCobrancasPorStatus(apiKey, 'RECEIVED'),
         listarCobrancasPorStatus(apiKey, 'CONFIRMED'),
-        listarClientes(apiKey),
+        comNomes ? listarClientes(apiKey) : Promise.resolve(new Map()),
       ])
       clientes = cadastro
       const porId = new Map<string, AsaasPayment>()
@@ -199,6 +202,8 @@ export async function adminAsaasRoutes(app: FastifyInstance) {
       string,
       {
         chave: string
+        /** Cobrança que representa a venda (a 1ª parcela, no parcelado). */
+        payment_id: string
         data: string
         valor: number
         forma: string
@@ -215,6 +220,7 @@ export async function adminAsaasRoutes(app: FastifyInstance) {
       if (comNota.has(chave)) continue
       const v = vendas.get(chave) || {
         chave,
+        payment_id: c.id,
         data: dataDaVenda(c),
         valor: 0,
         forma: c.billingType || '?',
@@ -253,6 +259,123 @@ export async function adminAsaasRoutes(app: FastifyInstance) {
       por_forma: porForma,
       vendas: lista,
     }
+  })
+
+
+  /**
+   * POST /admin/empresas/:empresaId/asaas/emitir-lote { payment_ids, excluir_chaves? }
+   *
+   * Emite as NFS-e de vendas antigas do Asaas — as anteriores à integração.
+   * A competência é a data da EMISSÃO (decisão da contabilidade): a nota atrasada
+   * entra no faturamento do mês em que sai, não no da venda.
+   *
+   * Pensado pra ser chamado em blocos pequenos: cada emissão leva alguns
+   * segundos e a função tem limite de tempo. Quem chama percorre a lista da
+   * rota sem-nota e manda até 8 ids por vez.
+   *
+   * É seguro repetir: a venda é registrada em webhook_events pela mesma chave
+   * da emissão automática, então nada sai em duplicidade — nem se o webhook do
+   * Asaas avisar a mesma venda de novo. Venda estornada ou que já tem nota é
+   * pulada, e o motivo volta no resultado.
+   */
+  app.post<{
+    Params: { empresaId: string }
+    Body: { payment_ids?: string[]; excluir_chaves?: string[] }
+  }>('/empresas/:empresaId/asaas/emitir-lote', async (req, reply) => {
+    const ids = [...new Set((req.body?.payment_ids || []).map((s) => String(s).trim()).filter(Boolean))]
+    if (ids.length === 0) return reply.status(400).send({ error: 'Informe payment_ids' })
+    if (ids.length > 8) return reply.status(400).send({ error: 'No máximo 8 por chamada' })
+    const excluir = new Set(req.body?.excluir_chaves || [])
+
+    const { data: empresa } = await supabase
+      .from('empresas')
+      .select('asaas_api_key_cifrado')
+      .eq('id', req.params.empresaId)
+      .maybeSingle()
+    if (!empresa?.asaas_api_key_cifrado) {
+      return reply.status(400).send({ error: 'Chave da API do Asaas não configurada' })
+    }
+    const apiKey = decryptSecret(empresa.asaas_api_key_cifrado)
+
+    const resultados: Array<{
+      payment_id: string
+      chave?: string
+      resultado: 'emitida' | 'pulada' | 'erro'
+      motivo?: string
+      nota_id?: string
+    }> = []
+
+    for (const id of ids) {
+      try {
+        const pagamento = await buscarPagamento(apiKey, id)
+        // Estornada, vencida ou não paga: não há venda a faturar.
+        if (pagamento.status !== 'RECEIVED' && pagamento.status !== 'CONFIRMED') {
+          resultados.push({ payment_id: id, resultado: 'pulada', motivo: `status ${pagamento.status}` })
+          continue
+        }
+        const chave = chaveEmissao(pagamento)
+        if (excluir.has(chave)) {
+          resultados.push({ payment_id: id, chave, resultado: 'pulada', motivo: 'excluída (já tem nota emitida à mão)' })
+          continue
+        }
+
+        const { data: existente } = await supabase
+          .from('webhook_events')
+          .select('id, status, nota_fiscal_id')
+          .eq('provider', 'asaas')
+          .eq('external_id', chave)
+          .maybeSingle()
+
+        let eventoId: string
+        if (existente) {
+          // Já tem nota, ou outra chamada está emitindo agora: não toca.
+          if (existente.nota_fiscal_id || existente.status !== 'erro') {
+            resultados.push({
+              payment_id: id,
+              chave,
+              resultado: 'pulada',
+              motivo: existente.nota_fiscal_id ? 'já tem nota' : `evento ${existente.status}`,
+              nota_id: existente.nota_fiscal_id ?? undefined,
+            })
+            continue
+          }
+          // Tentativa anterior falhou: refaz no mesmo registro.
+          eventoId = existente.id as string
+          await supabase.from('webhook_events').update({ status: 'processando', erro: null }).eq('id', eventoId)
+        } else {
+          const { data: novo, error } = await supabase
+            .from('webhook_events')
+            .insert({
+              provider: 'asaas',
+              external_id: chave,
+              empresa_id: req.params.empresaId,
+              event_type: 'PAYMENT_RECEIVED',
+              payload: { event: 'PAYMENT_RECEIVED', payment: pagamento, backfill: true, competencia: 'hoje' },
+              status: 'processando',
+            })
+            .select('id')
+            .single()
+          if (error || !novo) {
+            // O índice único barrou: outra chamada (ou o webhook) pegou antes.
+            resultados.push({ payment_id: id, chave, resultado: 'pulada', motivo: 'já em andamento' })
+            continue
+          }
+          eventoId = novo.id as string
+        }
+
+        const r = await emitirPorPagamentoAsaas(eventoId, req.params.empresaId, pagamento, { competenciaHoje: true })
+        resultados.push({
+          payment_id: id,
+          chave,
+          resultado: r.ok ? 'emitida' : 'erro',
+          motivo: r.erro,
+          nota_id: r.notaId,
+        })
+      } catch (e) {
+        resultados.push({ payment_id: id, resultado: 'erro', motivo: (e as Error).message })
+      }
+    }
+    return { total: ids.length, emitidas: resultados.filter((r) => r.resultado === 'emitida').length, resultados }
   })
 
   /**

@@ -30,7 +30,7 @@ export class AsaasApiError extends Error {
 
 async function get<T>(apiKey: string, path: string): Promise<T> {
   const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), 10_000)
+  const timer = setTimeout(() => ctrl.abort(), 25_000)
   try {
     const res = await fetch(`${baseUrl(apiKey)}${path}`, {
       signal: ctrl.signal,
@@ -60,6 +60,10 @@ async function get<T>(apiKey: string, path: string): Promise<T> {
   } finally {
     clearTimeout(timer)
   }
+}
+
+export function buscarPagamento(apiKey: string, paymentId: string): Promise<AsaasPayment> {
+  return get<AsaasPayment>(apiKey, `/payments/${encodeURIComponent(paymentId)}`)
 }
 
 export function buscarCliente(apiKey: string, customerId: string): Promise<AsaasCustomer> {

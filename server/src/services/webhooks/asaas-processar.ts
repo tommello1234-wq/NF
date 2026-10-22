@@ -100,8 +100,10 @@ export function montarEmissaoAsaas(params: {
   payment: AsaasPayment
   cliente: AsaasCustomer
   parcelamento?: AsaasInstallment | null
+  /** Nota atrasada: a competência é a data da EMISSÃO, não a da venda. */
+  competenciaHoje?: boolean
 }): { input: EmitirNfseInput } | { falha: string } {
-  const { empresaId, produtoId, payment, cliente, parcelamento } = params
+  const { empresaId, produtoId, payment, cliente, parcelamento, competenciaHoje } = params
 
   const doc = (cliente.cpfCnpj || '').replace(/\D/g, '')
   if (doc.length !== 11 && doc.length !== 14) {
@@ -157,7 +159,10 @@ export function montarEmissaoAsaas(params: {
       },
       valorServicos: valor,
       descricao: descricao?.slice(0, 1000),
-      dataCompetencia: dataDoAsaas(payment.confirmedDate || payment.paymentDate || payment.clientPaymentDate),
+      // Sem data → o orquestrador usa hoje.
+      dataCompetencia: competenciaHoje
+        ? undefined
+        : dataDoAsaas(payment.confirmedDate || payment.paymentDate || payment.clientPaymentDate),
     },
   }
 }
@@ -166,6 +171,7 @@ export async function emitirPorPagamentoAsaas(
   eventoId: string,
   empresaId: string,
   payment: AsaasPayment,
+  opcoes: { competenciaHoje?: boolean } = {},
 ): Promise<ResultadoAsaas> {
   const cfg = await carregarConfig(empresaId)
   if ('falha' in cfg) return fecharEvento(eventoId, erro(cfg.falha))
@@ -187,7 +193,14 @@ export async function emitirPorPagamentoAsaas(
     }
   }
 
-  const montado = montarEmissaoAsaas({ empresaId, produtoId: cfg.produtoId, payment, cliente, parcelamento })
+  const montado = montarEmissaoAsaas({
+    empresaId,
+    produtoId: cfg.produtoId,
+    payment,
+    cliente,
+    parcelamento,
+    competenciaHoje: opcoes.competenciaHoje,
+  })
   if ('falha' in montado) return fecharEvento(eventoId, erro(montado.falha))
 
   try {
@@ -317,7 +330,10 @@ export async function reprocessarEventoAsaas(eventoId: string): Promise<Resultad
 
   await supabase.from('webhook_events').update({ status: 'processando', erro: null }).eq('id', eventoId)
 
-  if (isEventoEmitir(payload.event)) return emitirPorPagamentoAsaas(eventoId, evento.empresa_id, payment)
+  if (isEventoEmitir(payload.event)) {
+    const competenciaHoje = (payload as unknown as { competencia?: string }).competencia === 'hoje'
+    return emitirPorPagamentoAsaas(eventoId, evento.empresa_id, payment, { competenciaHoje })
+  }
   if (isEventoCancelar(payload.event)) return cancelarPorEstornoAsaas(eventoId, evento.empresa_id, payment)
   return fecharEvento(eventoId, { ok: false, status: 'ignorado', erro: `Evento ${payload.event} não aciona emissão` })
 }
