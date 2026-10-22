@@ -16,6 +16,12 @@ export const SEFIN_URL = {
 } as const
 
 /** Parâmetros municipais ficam em outro host (ADN — Ambiente de Dados Nacional) */
+/** Distribuição de DF-e ao contribuinte: toda NFS-e em que o CNPJ aparece. */
+export const ADN_CONTRIB_URL = {
+  homolog: 'https://adn.producaorestrita.nfse.gov.br/contribuintes',
+  prod: 'https://adn.nfse.gov.br/contribuintes',
+} as const
+
 export const ADN_PARAM_URL = {
   homolog: 'https://adn.producaorestrita.nfse.gov.br/parametrizacao',
   prod: 'https://adn.nfse.gov.br/parametrizacao',

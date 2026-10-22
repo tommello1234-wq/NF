@@ -1,6 +1,6 @@
 import https from 'node:https'
 import type { Ambiente, NfseResponse } from './types.js'
-import { ADN_PARAM_URL, SEFIN_URL } from './types.js'
+import { ADN_CONTRIB_URL, ADN_PARAM_URL, SEFIN_URL } from './types.js'
 
 interface ClientDeps {
   agent: https.Agent
@@ -29,6 +29,16 @@ export async function postDps(deps: ClientDeps, dpsGzipBase64: string): Promise<
 export async function getNfse(deps: ClientDeps, chaveAcesso: string): Promise<NfseResponse> {
   const url = `${sefinBase(deps.ambiente)}/nfse/${encodeURIComponent(chaveAcesso)}`
   return doRequest(deps.agent, 'GET', url, null, { accept: 'application/json' })
+}
+
+/**
+ * Documentos fiscais do contribuinte a partir de um NSU (Ambiente de Dados
+ * Nacional). Traz TODA NFS-e em que o CNPJ do certificado aparece — inclusive
+ * as emitidas fora deste sistema (Emissor Nacional, contador, outro ERP).
+ */
+export async function getDfePorNsu(deps: ClientDeps, nsu: number): Promise<NfseResponse> {
+  const base = deps.ambiente === 1 ? ADN_CONTRIB_URL.prod : ADN_CONTRIB_URL.homolog
+  return doRequest(deps.agent, 'GET', `${base}/DFe/${nsu}?lote=true`, null, { accept: 'application/json' })
 }
 
 /** Consulta os parâmetros de convênio do município emissor (sanity check) */

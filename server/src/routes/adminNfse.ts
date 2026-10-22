@@ -6,7 +6,8 @@ import { cancelarNfse, emitirNfse } from '../services/nfse/orquestrador.js'
 import { carregarCertificado } from '../services/certificado.js'
 import { carregarMaterialPfx } from '../services/nfse/pfx-loader.js'
 import { criarMtlsAgent } from '../services/nfse/mtls-agent.js'
-import { getDanfsePdf } from '../services/nfse/nfse-client.js'
+import { getDanfsePdf, getDfePorNsu } from '../services/nfse/nfse-client.js'
+import { extrairDocumentos, type DocumentoDistribuido } from '../services/nfse/distribuicao.js'
 
 const emitirSchema = z.object({
   empresa_id: z.string().uuid(),
@@ -177,6 +178,59 @@ export async function adminNfseRoutes(app: FastifyInstance) {
     reply.header('content-disposition', `attachment; filename="nfse-${nota.chave_acesso_nfse || req.params.id}.xml"`)
     return reply.send(buffer)
   })
+
+  /**
+   * GET /admin/empresas/:empresaId/nfse/receita?nsu=0&paginas=10
+   *
+   * Todas as NFS-e que a Receita tem no CNPJ da empresa, inclusive as emitidas
+   * fora deste sistema — o número da NFS-e é único por CNPJ, então um buraco
+   * na nossa numeração é uma nota que saiu por outro caminho. Serve pra não
+   * emitir em duplicidade uma venda que já foi faturada por fora. Só leitura.
+   *
+   * Pagina pelo NSU: cada chamada ao ADN devolve um lote a partir do NSU
+   * pedido. `bruto=1` devolve também a 1ª resposta crua, pra diagnóstico.
+   */
+  app.get<{ Params: { empresaId: string }; Querystring: { nsu?: string; paginas?: string; bruto?: string } }>(
+    '/empresas/:empresaId/nfse/receita',
+    async (req, reply) => {
+      const cert = await carregarCertificado(req.params.empresaId)
+      if (!cert) return reply.status(400).send({ error: 'Certificado A1 não encontrado para a empresa' })
+      const agent = criarMtlsAgent(carregarMaterialPfx(cert.pfxBuffer, cert.senha), { insecureSkipServerVerify: true })
+
+      let nsu = Math.max(0, Number(req.query.nsu) || 0)
+      const paginas = Math.min(30, Math.max(1, Number(req.query.paginas) || 10))
+      const documentos: DocumentoDistribuido[] = []
+      let bruto: unknown = undefined
+      let parada = 'limite de páginas'
+      for (let i = 0; i < paginas; i++) {
+        const res = await getDfePorNsu({ agent, ambiente: 1 }, nsu)
+        let corpo: unknown = res.body
+        try {
+          corpo = JSON.parse(res.body)
+        } catch {
+          /* mantém o texto */
+        }
+        if (i === 0 && req.query.bruto === '1') {
+          bruto = { status: res.status, corpo: typeof corpo === 'string' ? corpo.slice(0, 1500) : JSON.stringify(corpo).slice(0, 1500) }
+        }
+        if (res.status !== 200) {
+          parada = `ADN respondeu ${res.status}`
+          if (res.status === 404 || res.status === 204) parada = 'fim'
+          break
+        }
+        const lote = extrairDocumentos(corpo)
+        if (lote.length === 0) {
+          parada = 'fim'
+          break
+        }
+        documentos.push(...lote)
+        const maior = Math.max(...lote.map((d) => d.nsu ?? 0))
+        if (!(maior >= nsu)) break
+        nsu = maior + 1
+      }
+      return { proximo_nsu: nsu, parada, total: documentos.length, documentos, bruto }
+    },
+  )
 
   /**
    * GET /admin/nfse/:id/danfse — DANFSe em PDF.
