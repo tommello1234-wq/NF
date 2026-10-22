@@ -80,7 +80,7 @@ export function buscarParcelamento(apiKey: string, installmentId: string): Promi
  */
 export async function listarCobrancasPorStatus(
   apiKey: string,
-  status: 'RECEIVED' | 'CONFIRMED',
+  status: string,
 ): Promise<AsaasPayment[]> {
   type Pagina = { data?: AsaasPayment[]; hasMore?: boolean; totalCount?: number }
   const pagina = (offset: number) =>

@@ -272,6 +272,50 @@ export async function adminAsaasRoutes(app: FastifyInstance) {
 
 
   /**
+   * GET /admin/empresas/:empresaId/asaas/fora-da-lista
+   *
+   * Cobranças que não contam como venda a faturar: estornadas, em
+   * contestação, recebidas em dinheiro. Serve pra explicar a diferença entre
+   * a lista sem-nota e o extrato do Asaas (que mostra o que entrou, mesmo que
+   * tenha sido estornado depois). Só leitura.
+   */
+  app.get<{ Params: { empresaId: string } }>('/empresas/:empresaId/asaas/fora-da-lista', async (req, reply) => {
+    const { data: empresa } = await supabase
+      .from('empresas')
+      .select('asaas_api_key_cifrado')
+      .eq('id', req.params.empresaId)
+      .maybeSingle()
+    if (!empresa?.asaas_api_key_cifrado) {
+      return reply.status(400).send({ error: 'Chave da API do Asaas não configurada' })
+    }
+    const apiKey = decryptSecret(empresa.asaas_api_key_cifrado)
+    const STATUS = [
+      'REFUNDED',
+      'REFUND_REQUESTED',
+      'REFUND_IN_PROGRESS',
+      'CHARGEBACK_REQUESTED',
+      'CHARGEBACK_DISPUTE',
+      'AWAITING_CHARGEBACK_REVERSAL',
+      'RECEIVED_IN_CASH',
+    ]
+    try {
+      const listas = await Promise.all(STATUS.map((s) => listarCobrancasPorStatus(apiKey, s)))
+      return {
+        cobrancas: listas.flat().map((c) => ({
+          fatura: String(c.invoiceNumber || ''),
+          status: c.status,
+          valor: Number(c.value || 0),
+          data: (c.confirmedDate || c.paymentDate || c.dateCreated || '').slice(0, 10),
+          chave: chaveEmissao(c),
+          descricao: (c.description || '').slice(0, 80),
+        })),
+      }
+    } catch (e) {
+      return reply.status(502).send({ error: (e as Error).message })
+    }
+  })
+
+  /**
    * POST /admin/empresas/:empresaId/asaas/emitir-lote { payment_ids, excluir_chaves? }
    *
    * Emite as NFS-e de vendas antigas do Asaas — as anteriores à integração.
