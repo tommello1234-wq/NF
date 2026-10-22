@@ -82,14 +82,22 @@ export async function listarCobrancasPorStatus(
   apiKey: string,
   status: 'RECEIVED' | 'CONFIRMED',
 ): Promise<AsaasPayment[]> {
-  const todas: AsaasPayment[] = []
-  for (let offset = 0; offset < 50_000; offset += 100) {
-    const r = await get<{ data?: AsaasPayment[]; hasMore?: boolean }>(
-      apiKey,
-      `/payments?status=${status}&limit=100&offset=${offset}`,
-    )
-    todas.push(...(r.data || []))
-    if (!r.hasMore) break
+  type Pagina = { data?: AsaasPayment[]; hasMore?: boolean; totalCount?: number }
+  const pagina = (offset: number) =>
+    get<Pagina>(apiKey, `/payments?status=${status}&limit=100&offset=${offset}`)
+
+  // A 1ª página diz quantas existem; as demais saem em paralelo. Em série eram
+  // ~15 idas ao Asaas de 3-4s cada, e a listagem encostava no limite de 60s da
+  // função.
+  const primeira = await pagina(0)
+  const todas = [...(primeira.data || [])]
+  const total = primeira.totalCount ?? todas.length
+  const offsets: number[] = []
+  for (let o = 100; o < total && o < 50_000; o += 100) offsets.push(o)
+  const SIMULTANEAS = 6
+  for (let i = 0; i < offsets.length; i += SIMULTANEAS) {
+    const lote = await Promise.all(offsets.slice(i, i + SIMULTANEAS).map(pagina))
+    for (const r of lote) todas.push(...(r.data || []))
   }
   return todas
 }
