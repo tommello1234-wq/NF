@@ -187,8 +187,8 @@ export async function adminNfseRoutes(app: FastifyInstance) {
    * na nossa numeração é uma nota que saiu por outro caminho. Serve pra não
    * emitir em duplicidade uma venda que já foi faturada por fora. Só leitura.
    *
-   * Pagina pelo NSU: cada chamada ao ADN devolve um lote a partir do NSU
-   * pedido. `bruto=1` devolve também a 1ª resposta crua, pra diagnóstico.
+   * Pagina pelo NSU: cada chamada ao ADN devolve um lote com os NSU maiores
+   * que o pedido. `bruto=1` devolve também a 1ª resposta crua, pra diagnóstico.
    */
   app.get<{ Params: { empresaId: string }; Querystring: { nsu?: string; paginas?: string; bruto?: string } }>(
     '/empresas/:empresaId/nfse/receita',
@@ -224,9 +224,11 @@ export async function adminNfseRoutes(app: FastifyInstance) {
           break
         }
         documentos.push(...lote)
+        // O ADN devolve os documentos com NSU MAIOR que o pedido: o próximo
+        // pedido é o último NSU recebido, não ele + 1 (isso pulava 1 a cada 50).
         const maior = Math.max(...lote.map((d) => d.nsu ?? 0))
-        if (!(maior >= nsu)) break
-        nsu = maior + 1
+        if (!(maior > nsu)) break
+        nsu = maior
       }
       return { proximo_nsu: nsu, parada, total: documentos.length, documentos, bruto }
     },
