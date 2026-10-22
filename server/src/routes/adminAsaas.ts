@@ -213,6 +213,8 @@ export async function adminAsaasRoutes(app: FastifyInstance) {
         cliente_tipo: 'PF' | 'PJ' | '?'
         descricao: string
         cobrancas: number
+        /** Cada cobrança da venda, pra conferir com o extrato do Asaas. */
+        parcelas: Array<{ fatura: string; valor: number; status: string; data: string }>
       }
     >()
     for (const c of cobrancas) {
@@ -231,9 +233,16 @@ export async function adminAsaasRoutes(app: FastifyInstance) {
         ),
         descricao: (c.description || '').replace(/^Parcela \d+ de \d+\.?\s*/i, '').slice(0, 120),
         cobrancas: 0,
+        parcelas: [],
       }
       v.valor = Math.round((v.valor + Number(c.value || 0)) * 100) / 100
       v.cobrancas++
+      v.parcelas.push({
+        fatura: String(c.invoiceNumber || ''),
+        valor: Number(c.value || 0),
+        status: c.status || '?',
+        data: dataDaVenda(c),
+      })
       const d = dataDaVenda(c)
       if (d && (!v.data || d < v.data)) v.data = d
       vendas.set(chave, v)

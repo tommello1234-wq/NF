@@ -19,6 +19,8 @@ export interface AsaasPayment {
   netValue?: number
   billingType?: 'BOLETO' | 'CREDIT_CARD' | 'DEBIT_CARD' | 'PIX' | 'UNDEFINED' | string
   status?: string
+  /** Número da fatura — é o que aparece no extrato do Asaas ("fatura nr. ..."). */
+  invoiceNumber?: string | null
   description?: string | null
   externalReference?: string | null
   dateCreated?: string
