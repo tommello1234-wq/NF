@@ -74,7 +74,7 @@ export function buildDpsXml(input: DpsInput): { xml: string; idDps: string } {
   // === toma === (TCInfoPessoa: choice → CAEPF? → IM? → xNome → end? → fone? → email?)
   const toma = inf.ele('toma')
   appendTomadorIdentificacao(toma, input.tomador)
-  toma.ele('xNome').txt(input.tomador.nome)
+  toma.ele('xNome').txt(textoSefin(input.tomador.nome, 300, 'CONSUMIDOR'))
   if (input.tomador.endereco) appendEndereco(toma.ele('end'), input.tomador.endereco)
 
   // === serv ===
@@ -86,7 +86,7 @@ export function buildDpsXml(input: DpsInput): { xml: string; idDps: string } {
   if (input.servico.codigoTributacaoMunicipal) {
     cServ.ele('cTribMun').txt(input.servico.codigoTributacaoMunicipal)
   }
-  cServ.ele('xDescServ').txt(input.servico.descricao)
+  cServ.ele('xDescServ').txt(textoSefin(input.servico.descricao, 2000, 'Prestacao de servico'))
   if (input.servico.codigoNBS) cServ.ele('cNBS').txt(input.servico.codigoNBS)
 
   // === valores ===
@@ -126,6 +126,31 @@ export function buildDpsXml(input: DpsInput): { xml: string; idDps: string } {
 
 // === helpers ===
 
+/**
+ * Texto livre no formato que o XSD da NFS-e aceita: só caracteres até U+00FF,
+ * sem espaço nas pontas. O que vem do cliente (nome, endereço digitado no
+ * checkout) traz travessão, aspas curvas, emoji — e um caractere desses
+ * reprova a nota inteira com E1235 ("Falha no esquema XML"). Foi o caso de um
+ * complemento "Ed. RODRIGO – Ap 302" em 23/10/2026. Troca pelo equivalente
+ * simples em vez de recusar.
+ */
+export function textoSefin(valor: unknown, max: number, padrao: string): string {
+  const limpo = String(valor ?? '')
+    .normalize('NFC')
+    .replace(/[\u2010-\u2015\u2212]/g, '-')
+    .replace(/[\u2018\u2019\u2032]/g, "'")
+    .replace(/[\u201C\u201D\u2033]/g, '"')
+    .replace(/[\u2022\u00B7]/g, '.')
+    .replace(/\u2026/g, '...')
+    .replace(/[^\x20-\xFF]/g, ' ')
+    .replace(/[\x7F-\x9F]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, max)
+    .trim()
+  return limpo || padrao
+}
+
 function appendTomadorIdentificacao(parent: ReturnType<typeof create>, tomador: TomadorDps) {
   if (tomador.cpf) {
     parent.ele('CPF').txt(onlyDigits(tomador.cpf))
@@ -142,10 +167,11 @@ function appendEndereco(parent: ReturnType<typeof create>, e: EnderecoDps) {
   endNac.ele('cMun').txt(e.codigoMunicipio)
   endNac.ele('CEP').txt(onlyDigits(e.cep))
 
-  parent.ele('xLgr').txt(e.logradouro)
-  parent.ele('nro').txt(e.numero)
-  if (e.complemento) parent.ele('xCpl').txt(e.complemento)
-  parent.ele('xBairro').txt(e.bairro)
+  parent.ele('xLgr').txt(textoSefin(e.logradouro, 255, 'NAO INFORMADO'))
+  parent.ele('nro').txt(textoSefin(e.numero, 60, 'S/N'))
+  const complemento = textoSefin(e.complemento, 156, '')
+  if (complemento) parent.ele('xCpl').txt(complemento)
+  parent.ele('xBairro').txt(textoSefin(e.bairro, 60, 'NAO INFORMADO'))
 }
 
 function isoUtc(d: Date): string {
