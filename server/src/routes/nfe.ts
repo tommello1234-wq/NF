@@ -184,6 +184,57 @@ export async function nfeRoutes(app: FastifyInstance) {
     return emitir(parsed.data, 65, reply, req.empresaId!)
   })
 
+  /**
+   * GET /v1/nfce/conferir?desde=ISO&ate=ISO&valor=200.00&documento=CPF
+   *
+   * NFC-e da empresa da chave criadas numa janela de tempo, com o valor (e o
+   * documento do consumidor, se informado). Serve pro ERP descobrir se uma
+   * emissão que ele não viu terminar — aba fechada, internet caindo, 504 da
+   * função — saiu ou não, antes de liberar a venda pra emitir de novo. Sem
+   * isso a única saída era adivinhar, e errar pra um lado gera nota duplicada.
+   * Só leitura.
+   */
+  app.get<{ Querystring: { desde?: string; ate?: string; valor?: string; documento?: string } }>(
+    '/nfce/conferir',
+    async (req, reply) => {
+      const desde = new Date(req.query.desde || '')
+      const ate = new Date(req.query.ate || '')
+      const valor = Number(req.query.valor)
+      if (Number.isNaN(desde.getTime()) || Number.isNaN(ate.getTime()) || !(valor > 0)) {
+        return reply.status(400).send({ error: 'Informe desde, ate (ISO) e valor' })
+      }
+      if (ate.getTime() - desde.getTime() > 24 * 3600_000 || ate < desde) {
+        return reply.status(400).send({ error: 'A janela precisa ter até 24 horas' })
+      }
+      const { data, error } = await supabase
+        .from('notas_fiscais')
+        .select('id, status, serie, numero, chave_acesso, protocolo, qr_code_nfce, url_consulta_nfce, destinatario_cpf_cnpj, valor_total, created_at')
+        .eq('empresa_id', req.empresaId!)
+        .eq('modelo', 65)
+        .gte('created_at', desde.toISOString())
+        .lte('created_at', ate.toISOString())
+        .gte('valor_total', valor - 0.009)
+        .lte('valor_total', valor + 0.009)
+        .order('created_at', { ascending: true })
+      if (error) return reply.status(500).send({ error: error.message })
+      const doc = (req.query.documento || '').replace(/\D/g, '')
+      const notas = (data || [])
+        .filter((n) => !doc || (n.destinatario_cpf_cnpj || '').replace(/\D/g, '') === doc)
+        .map((n) => ({
+          notaId: n.id,
+          status: n.status,
+          serie: n.serie,
+          numero: n.numero,
+          chaveAcesso: n.chave_acesso ?? undefined,
+          protocolo: n.protocolo ?? undefined,
+          qrCode: n.qr_code_nfce ?? undefined,
+          urlConsulta: n.url_consulta_nfce ?? undefined,
+          criadaEm: n.created_at,
+        }))
+      return { notas }
+    },
+  )
+
   /** POST /v1/nfe/:id/cancelar — cancela uma NF-e/NFC-e autorizada */
   app.post<{ Params: { id: string } }>('/nfe/:id/cancelar', async (req, reply) => {
     const parsed = cancelarSchema.safeParse(req.body)
