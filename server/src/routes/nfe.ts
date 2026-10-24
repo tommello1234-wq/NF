@@ -229,6 +229,8 @@ export async function nfeRoutes(app: FastifyInstance) {
           protocolo: n.protocolo ?? undefined,
           qrCode: n.qr_code_nfce ?? undefined,
           urlConsulta: n.url_consulta_nfce ?? undefined,
+          /** Só dígitos; vazio quando o consumidor não foi identificado. */
+          documento: (n.destinatario_cpf_cnpj || '').replace(/\D/g, ''),
           criadaEm: n.created_at,
         }))
       return { notas }
