@@ -1,7 +1,7 @@
 import { FastifyInstance, FastifyReply } from 'fastify'
 import { z } from 'zod'
 import { authApiKey } from '../middleware/authApiKey.js'
-import { emitirNfe, resolverNotaAguardando } from '../services/nfe/orquestrador.js'
+import { EmissaoRecusadaError, emitirNfe, resolverNotaAguardando } from '../services/nfe/orquestrador.js'
 import { cancelarNota } from '../services/nfe/cancelamento-orquestrador.js'
 import { inutilizarNumeracao } from '../services/nfe/inutilizacao-orquestrador.js'
 import { gerarDanfeNfe, gerarDanfeNfceBobina } from '../services/nfe/danfe.js'
@@ -559,6 +559,8 @@ async function emitir(
     const result = await emitirNfe(input)
     return reply.status(result.status === 'autorizada' ? 200 : 422).send(result)
   } catch (e) {
+    // 400 = nada chegou à SEFAZ; o ERP pode liberar a venda.
+    if (e instanceof EmissaoRecusadaError) return reply.status(400).send({ error: e.message })
     return reply.status(500).send({ error: (e as Error).message })
   }
 }

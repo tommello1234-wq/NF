@@ -33,6 +33,9 @@ import type { Ambiente, Modelo, NfeInput, NfeResult } from './types.js'
 const POLL_INTERVAL_MS = 2000
 const POLL_MAX_TRIES = 15
 
+/** A emissão foi recusada antes de falar com a SEFAZ — nenhuma nota existe. */
+export class EmissaoRecusadaError extends Error {}
+
 export async function emitirNfe(input: NfeInput): Promise<NfeResult> {
   const { data: empresa, error: empErr } = await supabase
     .from('empresas')
@@ -50,12 +53,22 @@ export async function emitirNfe(input: NfeInput): Promise<NfeResult> {
     throw new Error('Empresa sem CSC cadastrado pro ambiente atual — obrigatório pra NFC-e')
   }
 
+  // Certificado antes de reservar o número: com ele vencido a SEFAZ recusa a
+  // conexão, e cada tentativa queimava um número que depois precisa ser
+  // inutilizado.
+  const cert = await carregarCertificado(input.empresaId)
+  if (!cert) throw new EmissaoRecusadaError('Certificado A1 não encontrado pra empresa')
+  if (cert.info.validoAte.getTime() < Date.now()) {
+    throw new EmissaoRecusadaError(
+      `Certificado digital vencido em ${cert.info.validoAte.toLocaleDateString('pt-BR', { timeZone: 'America/Fortaleza' })}. ` +
+      'Nenhuma nota sai até enviar o certificado novo (Configurações → NFe). Nada foi emitido.',
+    )
+  }
+
   const serie = isNfce ? empresa.serie_nfce || 1 : empresa.serie_nfe || 1
   const numero = await reservarProximoNumero(input.empresaId, input.modelo, empresa)
 
   const natureza = await carregarNatureza(input.naturezaOperacaoId)
-  const cert = await carregarCertificado(input.empresaId)
-  if (!cert) throw new Error('Certificado A1 não encontrado pra empresa')
   const crt = (empresa.crt as 1 | 2 | 3 | 4) || 1
   // Padrões fiscais da empresa: usados só no Regime Normal, quando o item
   // vem sem CST/alíquota de ICMS (é o caso do ERP externo, cujo catálogo só
