@@ -1,7 +1,7 @@
 import { FastifyInstance, FastifyReply } from 'fastify'
 import { z } from 'zod'
 import { authApiKey } from '../middleware/authApiKey.js'
-import { emitirNfe } from '../services/nfe/orquestrador.js'
+import { emitirNfe, resolverNotaAguardando } from '../services/nfe/orquestrador.js'
 import { cancelarNota } from '../services/nfe/cancelamento-orquestrador.js'
 import { inutilizarNumeracao } from '../services/nfe/inutilizacao-orquestrador.js'
 import { gerarDanfeNfe, gerarDanfeNfceBobina } from '../services/nfe/danfe.js'
@@ -206,7 +206,7 @@ export async function nfeRoutes(app: FastifyInstance) {
       if (ate.getTime() - desde.getTime() > 24 * 3600_000 || ate < desde) {
         return reply.status(400).send({ error: 'A janela precisa ter até 24 horas' })
       }
-      const { data, error } = await supabase
+      const consultaNotas = () => supabase
         .from('notas_fiscais')
         .select('id, status, serie, numero, chave_acesso, protocolo, qr_code_nfce, url_consulta_nfce, destinatario_cpf_cnpj, valor_total, created_at')
         .eq('empresa_id', req.empresaId!)
@@ -216,7 +216,20 @@ export async function nfeRoutes(app: FastifyInstance) {
         .gte('valor_total', valor - 0.009)
         .lte('valor_total', valor + 0.009)
         .order('created_at', { ascending: true })
+      let { data, error } = await consultaNotas()
       if (error) return reply.status(500).send({ error: error.message })
+      // Nota que ficou aguardando a SEFAZ (ela não respondeu na emissão):
+      // pergunta pela chave antes de responder, senão o ERP nunca sai do
+      // "não deu pra confirmar". Só depois de 2 min, pra não atropelar uma
+      // emissão ainda em andamento.
+      const presas = (data || []).filter(
+        (n) => n.status === 'aguardando_sefaz' && Date.now() - new Date(n.created_at).getTime() > 2 * 60_000,
+      )
+      if (presas.length > 0) {
+        for (const n of presas) await resolverNotaAguardando(n.id).catch(() => undefined)
+        ;({ data, error } = await consultaNotas())
+        if (error) return reply.status(500).send({ error: error.message })
+      }
       const doc = (req.query.documento || '').replace(/\D/g, '')
       const notas = (data || [])
         .filter((n) => !doc || (n.destinatario_cpf_cnpj || '').replace(/\D/g, '') === doc)

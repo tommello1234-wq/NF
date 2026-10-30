@@ -15,11 +15,13 @@
 
 import { supabase } from '../supabase.js'
 import { carregarCertificado } from '../certificado.js'
+import { baixarArquivoStorage } from './comprovantes.js'
 import { gerarChaveAcesso } from './chave-acesso.js'
 import { buildNfeXml, sanitizarXProd, type BuildNfeInput, type ItemXml } from './builder-nfe.js'
 import { buildNfceXml } from './builder-nfce.js'
 import { assinarXmlNfe, carregarMaterialPfxNfe } from './signer.js'
 import {
+  consultarProtocolo,
   consultarRecibo,
   enviarLoteNfe,
   parseSoapResposta,
@@ -697,6 +699,59 @@ interface ProcessarParams {
   raw: SoapResposta
   itensInput: NfeInput['itens']
   xmlAssinado: string
+  /** A resposta já veio da consulta por chave — não consulta de novo. */
+  daConsulta?: boolean
+}
+
+/**
+ * Decide uma NFC-e/NF-e que ficou 'aguardando_sefaz' (a SEFAZ não respondeu
+ * na emissão) consultando a chave na SEFAZ. Autorizada → completa a nota como
+ * se a resposta tivesse chegado; 217 (não consta) → rejeitada, pode emitir de
+ * novo; qualquer outra coisa → continua aguardando.
+ */
+export async function resolverNotaAguardando(notaId: string): Promise<void> {
+  const { data: nota } = await supabase.from('notas_fiscais').select('*').eq('id', notaId).maybeSingle()
+  if (!nota || nota.status !== 'aguardando_sefaz' || !nota.chave_acesso) return
+  const cert = await carregarCertificado(nota.empresa_id)
+  if (!cert) return
+  const modelo = (Number(nota.modelo) === 65 || nota.tipo === 'nfce' ? 65 : 55) as Modelo
+  const ambiente = (nota.ambiente_nfe || 2) as Ambiente
+  const cfg: TransmissaoConfig = { modelo, ambiente, pfxBuffer: cert.pfxBuffer, pfxSenha: cert.senha }
+  const consulta = await consultarProtocolo(cfg, nota.chave_acesso).catch(() => null)
+  if (!consulta) return
+  const cStat = String((parseSoapResposta(consulta.body) as Record<string, unknown>).cStat ?? '')
+  if (cStat === '217') {
+    await supabase
+      .from('notas_fiscais')
+      .update({ status: 'rejeitada', status_detalhado: 'rejeitada', motivo_rejeicao: 'Não consta na SEFAZ — a nota não saiu.' })
+      .eq('id', notaId)
+    return
+  }
+  if (!['100', '150', '110', '301', '302'].includes(cStat)) return
+  const xml = nota.xml_path ? await baixarArquivoStorage('notas-xml', nota.xml_path) : null
+  if (!xml) return
+  await processarRespostaSefaz({
+    cfg,
+    notaId,
+    modelo,
+    ambiente,
+    serie: nota.serie,
+    numero: nota.numero,
+    chaveAcesso: nota.chave_acesso,
+    qrCode: nota.qr_code_nfce ?? undefined,
+    urlConsulta: nota.url_consulta_nfce ?? undefined,
+    raw: consulta,
+    itensInput: ((nota.payload_original as NfeInput | null)?.itens ?? []) as NfeInput['itens'],
+    xmlAssinado: xml.buffer.toString('utf-8'),
+    daConsulta: true,
+  })
+}
+
+/** Trecho legível de uma resposta que não é um retorno da SEFAZ (Fault, HTML, vazio). */
+function resumoRespostaEstranha(raw: SoapResposta): string {
+  const fault = raw.body.match(/<(?:\w+:)?(?:Text|faultstring)[^>]*>([\s\S]*?)<\//)
+  const texto = (fault?.[1] ?? raw.body.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim()
+  return `HTTP ${raw.status}${texto ? `: ${texto.slice(0, 200)}` : ' sem conteúdo'}`
 }
 
 async function processarRespostaSefaz(p: ProcessarParams): Promise<NfeResult> {
@@ -715,6 +770,64 @@ async function processarRespostaSefaz(p: ProcessarParams): Promise<NfeResult> {
   const cStat = String(protNFe?.cStat ?? resultado.cStat ?? '')
   const xMotivo = String(protNFe?.xMotivo ?? resultado.xMotivo ?? '')
   const protocolo = String(protNFe?.nProt ?? '')
+
+  // Sem cStat a resposta não é um retorno da SEFAZ (SOAP Fault, página de
+  // erro, conexão cortada). Isso não é rejeição: a nota pode ter saído ou não.
+  // Antes virava 'rejeitada' sem motivo — o ERP mostrava só "HTTP 422", liberava
+  // a venda e a próxima tentativa pegava outro número. Pergunta à SEFAZ pela
+  // chave e só decide com a resposta dela.
+  if (!cStat) {
+    const motivo = resumoRespostaEstranha(p.raw)
+    if (!p.daConsulta) {
+      const consulta = await consultarProtocolo(p.cfg, p.chaveAcesso).catch(() => null)
+      const cStatConsulta = consulta
+        ? String((parseSoapResposta(consulta.body) as Record<string, unknown>).cStat ?? '')
+        : ''
+      // 100/150 autorizada, 110/301/302 denegada — a consulta traz o protNFe.
+      if (consulta && ['100', '150', '110', '301', '302'].includes(cStatConsulta)) {
+        return processarRespostaSefaz({ ...p, raw: consulta, daConsulta: true })
+      }
+      if (cStatConsulta === '217') {
+        // 217 = a chave não consta na SEFAZ: a nota não saiu, pode tentar de novo.
+        const descricao = `A SEFAZ não processou a nota (${motivo}). Nada foi emitido — pode tentar de novo.`
+        await supabase
+          .from('notas_fiscais')
+          .update({ status: 'rejeitada', status_detalhado: 'rejeitada', motivo_rejeicao: descricao, mensagens_retorno: { raw: p.raw.body.slice(0, 8000) } })
+          .eq('id', p.notaId)
+        return {
+          notaId: p.notaId,
+          status: 'rejeitada',
+          modelo: p.modelo,
+          ambiente: p.ambiente,
+          serie: p.serie,
+          numero: p.numero,
+          chaveAcesso: p.chaveAcesso,
+          erros: [{ codigo: 'SEFAZ', descricao }],
+          rawResponse: p.raw.body,
+        }
+      }
+    }
+    // Não deu pra confirmar: a nota fica aguardando e o ERP segura a venda
+    // até alguém conferir (Verificar emissão).
+    await supabase
+      .from('notas_fiscais')
+      .update({ motivo_rejeicao: `Resposta da SEFAZ sem resultado (${motivo})`, mensagens_retorno: { raw: p.raw.body.slice(0, 8000) } })
+      .eq('id', p.notaId)
+    return {
+      notaId: p.notaId,
+      status: 'falha_temporaria',
+      modelo: p.modelo,
+      ambiente: p.ambiente,
+      serie: p.serie,
+      numero: p.numero,
+      chaveAcesso: p.chaveAcesso,
+      erros: [{
+        codigo: 'SEFAZ',
+        descricao: `A SEFAZ não deu resposta (${motivo}). Não dá pra saber ainda se a nota saiu — use "Verificar emissão" daqui a alguns minutos antes de emitir de novo.`,
+      }],
+      rawResponse: p.raw.body,
+    }
+  }
 
   const autorizada = cStat === '100' || cStat === '150'
   const denegada = cStat === '110' || cStat === '301' || cStat === '302'
