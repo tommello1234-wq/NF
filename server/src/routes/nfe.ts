@@ -429,7 +429,7 @@ async function resolverNaturezaPadrao(
     .eq('ativo', true)
     .order('created_at', { ascending: true })
   if (!data || data.length === 0) {
-    throw new Error(
+    throw new EmissaoRecusadaError(
       'Empresa sem natureza de operação cadastrada — cadastre uma (ex: "Venda balcão" CFOP 5102) ou envie natureza_operacao_id',
     )
   }
@@ -447,7 +447,28 @@ async function resolverNaturezaPadrao(
   if (alvo) {
     const casa = data.find((n) => String(n.finalidade || '') === alvo)
     if (casa) return casa.id
-    throw new Error(
+    // Devolução ao fornecedor é igual pra toda loja: cria a natureza padrão
+    // em vez de travar a primeira devolução de cada empresa num cadastro que
+    // ninguém sabe fazer. Fornecedor não é consumidor final; indPres 0 = não
+    // se aplica (não é venda).
+    if (alvo === 'devolucao') {
+      const { data: criada, error } = await supabase
+        .from('naturezas_operacao')
+        .insert({
+          empresa_id: empresaId,
+          nome: 'Devolução de compra',
+          natureza: 'DEVOLUCAO DE COMPRA',
+          tipo_operacao: 'saida',
+          finalidade: 'devolucao',
+          consumidor_final: false,
+          indicador_presenca: 0,
+          modalidade_frete: 9,
+        })
+        .select('id')
+        .single()
+      if (!error && criada) return criada.id
+    }
+    throw new EmissaoRecusadaError(
       `Empresa sem natureza de operação com finalidade "${alvo}" — cadastre uma (ex: "Devolução de compra", CFOP 6202) ou envie natureza_operacao_id`,
     )
   }

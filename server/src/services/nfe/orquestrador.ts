@@ -42,15 +42,15 @@ export async function emitirNfe(input: NfeInput): Promise<NfeResult> {
     .select('*')
     .eq('id', input.empresaId)
     .maybeSingle()
-  if (empErr || !empresa) throw new Error(`Empresa não encontrada: ${input.empresaId}`)
-  if (!empresa.ie) throw new Error('Empresa sem Inscrição Estadual — obrigatória pra NF-e/NFC-e')
-  if (!empresa.endereco_codigo_ibge) throw new Error('Empresa sem código IBGE de município')
+  if (empErr || !empresa) throw new EmissaoRecusadaError(`Empresa não encontrada: ${input.empresaId}`)
+  if (!empresa.ie) throw new EmissaoRecusadaError('Empresa sem Inscrição Estadual — obrigatória pra NF-e/NFC-e')
+  if (!empresa.endereco_codigo_ibge) throw new EmissaoRecusadaError('Empresa sem código IBGE de município')
 
   const ambiente = (empresa.ambiente_sefaz || 2) as Ambiente
   const isNfce = input.modelo === 65
   const csc = resolverCsc(empresa, ambiente)
   if (isNfce && (!csc.id || !csc.token)) {
-    throw new Error('Empresa sem CSC cadastrado pro ambiente atual — obrigatório pra NFC-e')
+    throw new EmissaoRecusadaError('Empresa sem CSC cadastrado pro ambiente atual — obrigatório pra NFC-e')
   }
 
   // Certificado antes de reservar o número: com ele vencido a SEFAZ recusa a
