@@ -473,6 +473,31 @@ async function resolverNaturezaPadrao(
     )
   }
 
+  // Remessa em garantia (peça com defeito de volta ao fabricante) sai com
+  // natOp "Remessa em Garantia" e finalidade normal — como as ~80 que a
+  // Sobral emitiu pelo SSÓtica (CFOP 6949). Sem a natureza, cairia na de
+  // venda e a nota sairia escrita "Venda". Cria a padrão se faltar.
+  if (tipoDocumento === 'remessa_garantia' || tipoDocumento === 'remessa_garantia_xml') {
+    const casa = data.find((n) => /garantia/i.test(String(n.nome || '')))
+    if (casa) return casa.id
+    const { data: criada, error } = await supabase
+      .from('naturezas_operacao')
+      .insert({
+        empresa_id: empresaId,
+        nome: 'Remessa em garantia',
+        natureza: 'Remessa em Garantia',
+        tipo_operacao: 'saida',
+        finalidade: 'normal',
+        consumidor_final: false,
+        indicador_presenca: 0,
+        modalidade_frete: 9,
+      })
+      .select('id')
+      .single()
+    if (!error && criada) return criada.id
+    throw new EmissaoRecusadaError('Não foi possível criar a natureza "Remessa em garantia" da empresa')
+  }
+
   // Venda: prefere uma que pareça venda de balcão; senão, a primeira ativa.
   const venda = data.find((n) => /balc|venda/i.test(String(n.nome || '')))
   return (venda || data[0]).id
