@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ShieldCheck } from 'lucide-react'
+import { Eye, EyeOff, ShieldCheck } from 'lucide-react'
 import { toast } from 'sonner'
 import { supabase } from '../lib/supabase'
 
@@ -8,6 +8,7 @@ export default function Login() {
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [senha, setSenha] = useState('')
+  const [mostrarSenha, setMostrarSenha] = useState(false)
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
@@ -54,13 +55,25 @@ export default function Login() {
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-muted-dark">Senha</label>
-            <input
-              type="password"
-              value={senha}
-              onChange={(e) => setSenha(e.target.value)}
-              required
-              className="w-full rounded-lg border border-black/[0.08] bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30"
-            />
+            <div className="relative">
+              <input
+                type={mostrarSenha ? 'text' : 'password'}
+                value={senha}
+                onChange={(e) => setSenha(e.target.value)}
+                required
+                autoComplete="current-password"
+                className="w-full rounded-lg border border-black/[0.08] bg-white py-2.5 pl-3 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30"
+              />
+              <button
+                type="button"
+                onClick={() => setMostrarSenha((v) => !v)}
+                aria-label={mostrarSenha ? 'Esconder senha' : 'Mostrar senha'}
+                title={mostrarSenha ? 'Esconder senha' : 'Mostrar senha'}
+                className="absolute inset-y-0 right-0 flex items-center px-3 text-muted hover:text-dark"
+              >
+                {mostrarSenha ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
           </div>
           <button
             type="submit"
