@@ -579,6 +579,9 @@ function aplicarImportacao(itensXml: ItemXml[], input: NfeInput) {
     x.valorUnitario = ii.valorProduto / x.quantidadeComercial
     x.valorOutras = ii.valorOutras
     x.aliquotaIcms = ii.aliquotaIcms
+    // CFOP de importação exige o grupo IPI (rejeição 597). Sem IPI na DI,
+    // vai CST 01 (entrada tributada com alíquota zero).
+    x.cstIpi = x.cstIpi || '01'
     x.importacao = {
       di: { ...imp.di, valorAfrmm: ii.valorAfrmm },
       adicao: ii.adicao,
