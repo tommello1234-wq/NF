@@ -49,6 +49,8 @@ export interface BuildNfeInput {
   intermediador?: IntermediadorXml
   /** NF referenciada (devolução, complementar, ajuste) — gera <NFref> dentro de <ide> */
   nfReferenciada?: { chave: string }
+  /** 0 = entrada (importação), 1 = saída (default). */
+  tipoNF?: 0 | 1
 }
 
 export interface IntermediadorXml {
@@ -75,6 +77,16 @@ export interface DestinatarioXml {
   endereco?: EnderecoXml
   ie?: string
   indicadorIe: 1 | 2 | 9
+  /** Destinatário no exterior (exportador da importação): idEstrangeiro + UF EX. */
+  estrangeiro?: {
+    id?: string
+    logradouro: string
+    numero: string
+    bairro: string
+    municipio: string
+    paisCodigo: string
+    paisNome: string
+  }
 }
 
 export interface EnderecoXml {
@@ -146,6 +158,20 @@ export interface ItemXml {
   valorDesconto?: number
   /** ID interno (não vai pro XML) — útil pro orquestrador persistir o vínculo */
   produtoId?: string
+  /** vOutro do item (importação: PIS/COFINS/Siscomex/AFRMM/ICMS). */
+  valorOutras?: number
+  /** Importação: grupo DI do item + imposto de importação + ICMS pronto. */
+  importacao?: {
+    di: { numero: string; dataRegistro: string; localDesembaraco: string; ufDesembaraco: string; dataDesembaraco: string; viaTransporte: number; valorAfrmm: number; intermediacao: number; codigoExportador: string }
+    adicao: number
+    sequencial: number
+    fabricante: string
+    baseII: number
+    valorII: number
+    despesasAduaneiras: number
+    baseIcms: number
+    valorIcms: number
+  }
 }
 
 export interface TotalXml {
@@ -157,6 +183,7 @@ export interface TotalXml {
   valorBaseIcms?: number
   valorIcms: number
   valorIcmsSt: number
+  valorII?: number
   valorIpi: number
   valorPis: number
   valorCofins: number
@@ -199,7 +226,7 @@ export function buildNfeXml(input: BuildNfeInput): { xml: string; idNfe: string 
   // existir o XSD exige um de CNPJ/CPF/idEstrangeiro. Cliente cadastrado sem
   // documento (ou com documento incompleto) gerava um <dest> só com o nome —
   // XML inválido, recusado no schema. Sem documento, melhor não emitir o grupo.
-  if (input.dest && (input.dest.cpf || input.dest.cnpj)) {
+  if (input.dest && (input.dest.cpf || input.dest.cnpj || input.dest.estrangeiro)) {
     infNFe.dest = montarDest(input.dest)
   }
   infNFe.det = input.itens.map((item) => montarDet(item, input))
@@ -236,7 +263,7 @@ function montarIde(input: BuildNfeInput) {
   const ufDest = input.dest?.endereco?.uf
   let idDest = '1'                                    // 1=interna (default)
   if (ufDest && ufDest !== ufEmit) idDest = '2'       // 2=interestadual
-  // EX é só caso especial (operação no exterior) — não cobrimos por enquanto
+  if (input.dest?.estrangeiro) idDest = '3'           // 3=exterior (importação)
 
   const ide: Record<string, unknown> = {
     cUF: '23',                                        // CE
@@ -249,7 +276,7 @@ function montarIde(input: BuildNfeInput) {
     ...(input.modelo === 55 && input.dataSaida
       ? { dhSaiEnt: toIsoUtc(input.dataSaida) }
       : {}),
-    tpNF: '1',                                        // 1=saída
+    tpNF: String(input.tipoNF ?? 1),                  // 0=entrada, 1=saída
     idDest,
     cMunFG: input.emit.endereco.codigoMunicipio,
     tpImp: input.modelo === 65 ? '4' : '1',           // 1=retrato, 4=DANFE NFC-e
@@ -307,6 +334,26 @@ function montarEmit(e: EmitenteXml) {
 }
 
 function montarDest(d: DestinatarioXml) {
+  if (d.estrangeiro) {
+    const e = d.estrangeiro
+    // Exterior: idEstrangeiro (pode ir vazio), município 9999999 "EXTERIOR",
+    // UF "EX", país pela tabela BACEN, sempre não contribuinte.
+    return {
+      idEstrangeiro: e.id || '',
+      xNome: d.nome,
+      enderDest: {
+        xLgr: e.logradouro,
+        nro: e.numero || 'S/N',
+        xBairro: e.bairro || 'EXTERIOR',
+        cMun: '9999999',
+        xMun: 'EXTERIOR',
+        UF: 'EX',
+        cPais: e.paisCodigo,
+        xPais: e.paisNome,
+      },
+      indIEDest: '9',
+    }
+  }
   return {
     ...(d.cnpj ? { CNPJ: d.cnpj } : d.cpf ? { CPF: d.cpf } : {}),
     xNome: d.nome,
@@ -363,7 +410,11 @@ function montarDet(item: ItemXml, ctx: BuildNfeInput) {
     interestadual && ctx.consumidorFinal && ctx.dest?.indicadorIe === 9
   const uTrib = item.unidadeTributavel || item.unidadeComercial
   const qTrib = (item.quantidadeTributavel ?? item.quantidadeComercial).toFixed(4)
-  const vUnTrib = (item.valorUnitarioTributavel ?? item.valorUnitario).toFixed(4)
+  // Na importação o vProd é o CIF exato e o unitário é CIF/qtd: com 4 casas,
+  // qCom × vUnCom erraria o vProd por centavos em lote grande (rejeição 629).
+  // O leiaute aceita até 10 casas.
+  const casasUn = item.importacao ? 10 : 4
+  const vUnTrib = (item.valorUnitarioTributavel ?? item.valorUnitario).toFixed(casasUn)
 
   return {
     '@nItem': String(item.numero),
@@ -380,14 +431,17 @@ function montarDet(item: ItemXml, ctx: BuildNfeInput) {
       CFOP: item.cfop,
       uCom: item.unidadeComercial,
       qCom: item.quantidadeComercial.toFixed(4),
-      vUnCom: item.valorUnitario.toFixed(4),
+      vUnCom: item.valorUnitario.toFixed(casasUn),
       vProd: item.valorTotal.toFixed(2),
       cEANTrib: item.gtin || 'SEM GTIN',
       uTrib,
       qTrib,
       vUnTrib,
       ...(item.valorDesconto ? { vDesc: item.valorDesconto.toFixed(2) } : {}),
+      ...(item.valorOutras ? { vOutro: item.valorOutras.toFixed(2) } : {}),
       indTot: '1',
+      // Ordem do XSD: indTot → DI → detExport → xPed → nItemPed → nFCI.
+      ...(item.importacao ? { DI: montarDi(item.importacao) } : {}),
       // FCI (Ficha de Conteúdo de Importação): obrigatória em produto com
       // origem 3/5/8 (conteúdo importado). Vem na nota de compra e precisa
       // ser repetida na devolução. Vai depois de indTot, como manda o XSD.
@@ -435,7 +489,17 @@ function montarImposto(item: ItemXml, aplicaDifal: boolean, crt: 1 | 2 | 3 | 4 =
     // <ICMSSN103>, <ICMSSN203> — tags inexistentes no XSD, e o lote é
     // recusado na validação de schema antes de qualquer análise fiscal.
     const grupo = grupoIcmsSn(code)
-    if (grupo === 'ICMSSN101' || grupo === 'ICMSSN201') {
+    if (grupo === 'ICMSSN900' && item.importacao) {
+      // Importação: base "por dentro" e ICMS exatamente como no DAE pago.
+      icms[grupo] = {
+        orig,
+        CSOSN: code,
+        modBC: '3',
+        vBC: item.importacao.baseIcms.toFixed(2),
+        pICMS: (item.aliquotaIcms || 0).toFixed(4),
+        vICMS: item.importacao.valorIcms.toFixed(2),
+      }
+    } else if (grupo === 'ICMSSN101' || grupo === 'ICMSSN201') {
       icms[grupo] = {
         orig,
         CSOSN: code,
@@ -466,7 +530,17 @@ function montarImposto(item: ItemXml, aplicaDifal: boolean, crt: 1 | 2 | 3 | 4 =
     }
   } else {
     // Regime Normal — usa CST (00, 10, 20, 30, 40, 41, 50, 51, 60, 70, 90)
-    if (code === '00') {
+    if (item.importacao) {
+      // Importação no Regime Normal: CST 00 com a base e o ICMS do DAE.
+      icms.ICMS00 = {
+        orig,
+        CST: '00',
+        modBC: '3',
+        vBC: item.importacao.baseIcms.toFixed(2),
+        pICMS: (item.aliquotaIcms || 0).toFixed(2),
+        vICMS: item.importacao.valorIcms.toFixed(2),
+      }
+    } else if (code === '00') {
       icms.ICMS00 = {
         orig,
         CST: '00',
@@ -552,6 +626,16 @@ function montarImposto(item: ItemXml, aplicaDifal: boolean, crt: 1 | 2 | 3 | 4 =
     }
   }
 
+  // II vem entre IPI e PIS (ordem do XSD).
+  if (item.importacao) {
+    imposto.II = {
+      vBC: item.importacao.baseII.toFixed(2),
+      vDespAdu: item.importacao.despesasAduaneiras.toFixed(2),
+      vII: item.importacao.valorII.toFixed(2),
+      vIOF: '0.00',
+    }
+  }
+
   // PIS e COFINS depois de IPI (ordem do XSD)
   imposto.PIS = { [grupoPis(item.cstPis)]: pisPayload(item) }
   imposto.COFINS = { [grupoCofins(item.cstCofins)]: cofinsPayload(item) }
@@ -587,7 +671,7 @@ function montarTotal(t: TotalXml) {
       vFrete: t.valorFrete.toFixed(2),
       vSeg: t.valorSeguro.toFixed(2),
       vDesc: t.valorDesconto.toFixed(2),
-      vII: '0.00',
+      vII: (t.valorII ?? 0).toFixed(2),
       vIPI: t.valorIpi.toFixed(2),
       vIPIDevol: '0.00',
       vPIS: t.valorPis.toFixed(2),
@@ -689,7 +773,7 @@ function montarTransp(t: TranspXml) {
       ...(t.transportadora.cnpj ? { CNPJ: t.transportadora.cnpj } : {}),
       ...(t.transportadora.nome ? { xNome: t.transportadora.nome } : {}),
       ...(t.transportadora.ie ? { IE: t.transportadora.ie } : {}),
-      ...(t.transportadora.endereco ? { xEnder: t.transportadora.endereco } : {}),
+      ...(t.transportadora.endereco ? { xEnder: t.transportadora.endereco.slice(0, 60) } : {}),
       ...(t.transportadora.municipio ? { xMun: t.transportadora.municipio } : {}),
       ...(t.transportadora.uf ? { UF: t.transportadora.uf } : {}),
     }
@@ -712,6 +796,27 @@ function montarTransp(t: TranspXml) {
     }))
   }
   return out
+}
+
+/** Grupo <DI> do item de importação (dentro de <prod>). */
+function montarDi(imp: NonNullable<ItemXml['importacao']>) {
+  return {
+    nDI: imp.di.numero,
+    dDI: imp.di.dataRegistro,
+    xLocDesemb: imp.di.localDesembaraco.slice(0, 60),
+    UFDesemb: imp.di.ufDesembaraco,
+    dDesemb: imp.di.dataDesembaraco,
+    tpViaTransp: String(imp.di.viaTransporte),
+    // vAFRMM é obrigatório na via marítima.
+    ...(imp.di.viaTransporte === 1 ? { vAFRMM: imp.di.valorAfrmm.toFixed(2) } : {}),
+    tpIntermedio: String(imp.di.intermediacao),
+    cExportador: imp.di.codigoExportador.slice(0, 60),
+    adi: {
+      nAdicao: String(imp.adicao),
+      nSeqAdic: String(imp.sequencial),
+      cFabricante: imp.fabricante.slice(0, 60),
+    },
+  }
 }
 
 function montarPag(pagamentos: PagamentoXml[]) {

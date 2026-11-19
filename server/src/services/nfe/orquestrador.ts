@@ -17,7 +17,7 @@ import { supabase } from '../supabase.js'
 import { carregarCertificado } from '../certificado.js'
 import { baixarArquivoStorage } from './comprovantes.js'
 import { gerarChaveAcesso } from './chave-acesso.js'
-import { buildNfeXml, sanitizarXProd, type BuildNfeInput, type ItemXml } from './builder-nfe.js'
+import { buildNfeXml, sanitizarXProd, type BuildNfeInput, type DestinatarioXml, type ItemXml } from './builder-nfe.js'
 import { buildNfceXml } from './builder-nfce.js'
 import { assinarXmlNfe, carregarMaterialPfxNfe } from './signer.js'
 import {
@@ -80,12 +80,14 @@ export async function emitirNfe(input: NfeInput): Promise<NfeResult> {
       empresa.icms_aliquota_padrao != null ? Number(empresa.icms_aliquota_padrao) : undefined,
   }
   const itensXml = await carregarItens(input.itens, crt, padroesIcms)
+  const ehImportacao = input.tipoDocumento === 'importacao'
+  if (ehImportacao) aplicarImportacao(itensXml, input)
   // Regra SEFAZ: em homologação (ambiente=2) a descrição do PRIMEIRO item DEVE
   // ser literalmente esse texto. Caso contrário cStat 373.
   if (ambiente === 2 && itensXml[0]) {
     itensXml[0].descricao = 'NOTA FISCAL EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL'
   }
-  const dest = await resolverDestinatario(input)
+  const dest: DestinatarioXml | undefined = ehImportacao ? destinatarioExterior(input) : await resolverDestinatario(input)
 
   const dataEmissao = new Date()
   const { chave, cnf, cdv } = gerarChaveAcesso({
@@ -157,6 +159,7 @@ export async function emitirNfe(input: NfeInput): Promise<NfeResult> {
           cnpj: tNovo.cnpj || undefined,
           nome: tNovo.nome || undefined,
           ie: tNovo.ie || undefined,
+          endereco: tNovo.endereco || undefined,
           municipio: tNovo.municipio || undefined,
           uf: tNovo.uf || undefined,
         }
@@ -199,6 +202,7 @@ export async function emitirNfe(input: NfeInput): Promise<NfeResult> {
     ...(input.chaveAcessoReferenciada
       ? { nfReferenciada: { chave: input.chaveAcessoReferenciada } }
       : {}),
+    ...(ehImportacao ? { tipoNF: 0 as const } : {}),
     pag: [
       {
         forma: input.pagamento.forma,
@@ -560,6 +564,52 @@ function itemXmlDeInline(
   }
 }
 
+/**
+ * Importação: cada item leva a DI, o II e o ICMS já calculados pelo
+ * despachante, e o vProd é o valor aduaneiro exato (não qtd × unitário
+ * arredondado). Barra antes de reservar nada se faltar dado.
+ */
+function aplicarImportacao(itensXml: ItemXml[], input: NfeInput) {
+  const imp = input.importacao
+  if (!imp) throw new EmissaoRecusadaError('Nota de importação sem os dados da DI e do exportador (campo "importacao")')
+  itensXml.forEach((x, idx) => {
+    const ii = input.itens[idx].importacao
+    if (!ii) throw new EmissaoRecusadaError(`Item ${idx + 1}: nota de importação exige os valores da importação do item`)
+    x.valorTotal = ii.valorProduto
+    x.valorUnitario = ii.valorProduto / x.quantidadeComercial
+    x.valorOutras = ii.valorOutras
+    x.aliquotaIcms = ii.aliquotaIcms
+    x.importacao = {
+      di: { ...imp.di, valorAfrmm: ii.valorAfrmm },
+      adicao: ii.adicao,
+      sequencial: ii.sequencial,
+      fabricante: ii.fabricante,
+      baseII: ii.baseII,
+      valorII: ii.valorII,
+      despesasAduaneiras: ii.despesasAduaneiras,
+      baseIcms: ii.baseIcms,
+      valorIcms: ii.valorIcms,
+    }
+  })
+}
+
+function destinatarioExterior(input: NfeInput) {
+  const e = input.importacao!.exportador
+  return {
+    nome: e.nome,
+    indicadorIe: 9 as const,
+    estrangeiro: {
+      id: e.idEstrangeiro,
+      logradouro: e.logradouro,
+      numero: e.numero || 'S/N',
+      bairro: e.bairro || 'EXTERIOR',
+      municipio: e.municipio,
+      paisCodigo: e.paisCodigo,
+      paisNome: e.paisNome,
+    },
+  }
+}
+
 async function persistirItens(
   notaId: string,
   itensXml: ItemXml[],
@@ -666,11 +716,19 @@ function calcularTotais(itens: ItemXml[], _input: NfeInput, crt: 1 | 2 | 3 | 4 =
     if (!i.aliquotaIcms) return false
     return isSimples ? i.cstCsosn === '900' : !['40', '41', '50', '60'].includes(i.cstCsosn)
   }
+  // Importação: base e ICMS vêm prontos por item (o que foi pago no DAE).
   const valorIcmsTotal = itens.reduce(
-    (s, i) => (destacaIcms(i) ? s + (base(i) * (i.aliquotaIcms! / 100)) : s),
+    (s, i) =>
+      i.importacao ? s + i.importacao.valorIcms
+      : destacaIcms(i) ? s + (base(i) * (i.aliquotaIcms! / 100)) : s,
     0,
   )
-  const valorBaseIcms = itens.reduce((s, i) => (destacaIcms(i) ? s + base(i) : s), 0)
+  const valorBaseIcms = itens.reduce(
+    (s, i) => (i.importacao ? s + i.importacao.baseIcms : destacaIcms(i) ? s + base(i) : s),
+    0,
+  )
+  const valorII = itens.reduce((s, i) => s + (i.importacao?.valorII || 0), 0)
+  const valorOutras = itens.reduce((s, i) => s + (i.valorOutras || 0), 0)
   // PIS / COFINS: soma só dos itens com CST tributável (PISAliq, COFINSAliq).
   // Pra CST 04, 06-09, 49 (NT/Outras), o item não soma.
   const cstsTributados = ['01', '02']
@@ -688,14 +746,16 @@ function calcularTotais(itens: ItemXml[], _input: NfeInput, crt: 1 | 2 | 3 | 4 =
     valorDesconto,
     valorFrete: 0,
     valorSeguro: 0,
-    valorOutras: 0,
+    valorOutras: +valorOutras.toFixed(2),
+    valorII: +valorII.toFixed(2),
     valorIcms: +valorIcmsTotal.toFixed(2),
     valorBaseIcms: +valorBaseIcms.toFixed(2),
     valorIcmsSt: 0,
     valorIpi: +valorIpi.toFixed(2),
     valorPis: +valorPisTotal.toFixed(2),
     valorCofins: +valorCofinsTotal.toFixed(2),
-    valorTotalNota: +(valorProdutos - valorDesconto + valorIpi).toFixed(2),
+    // vNF = vProd − vDesc + vOutro + vII + vIPI (regra 610 da SEFAZ).
+    valorTotalNota: +(valorProdutos - valorDesconto + valorOutras + valorII + valorIpi).toFixed(2),
   }
 }
 

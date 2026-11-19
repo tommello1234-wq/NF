@@ -60,6 +60,23 @@ const itemSchema = z
     cfop: z.string().regex(/^\d{4}$/).optional(),
     info_adicional: z.string().max(500).optional(),
     produto: produtoInlineSchema.optional(),
+    /** Só na nota de importação: valores do item vindos da planilha do despachante. */
+    importacao: z
+      .object({
+        adicao: z.coerce.number().int().positive(),
+        sequencial: z.coerce.number().int().positive(),
+        fabricante: z.string().min(1).max(60),
+        valor_produto: z.coerce.number().positive(),
+        base_ii: z.coerce.number().nonnegative(),
+        valor_ii: z.coerce.number().nonnegative(),
+        despesas_aduaneiras: z.coerce.number().nonnegative(),
+        valor_afrmm: z.coerce.number().nonnegative(),
+        valor_outras: z.coerce.number().nonnegative(),
+        base_icms: z.coerce.number().nonnegative(),
+        aliquota_icms: z.coerce.number().nonnegative(),
+        valor_icms: z.coerce.number().nonnegative(),
+      })
+      .optional(),
   })
   .refine((i) => Boolean(i.produto_id) || Boolean(i.produto), {
     message: 'Informe "produto_id" (produto cadastrado) ou "produto" (dados fiscais inline)',
@@ -128,6 +145,51 @@ const emitirSchema = z.object({
       ]),
       valor_frete: z.coerce.number().nonnegative().optional(),
       valor_seguro: z.coerce.number().nonnegative().optional(),
+      transportadora: z
+        .object({
+          nome: z.string().max(60).optional(),
+          cnpj: z.string().regex(/^\d{14}$/).optional(),
+          ie: z.string().max(14).optional(),
+          endereco: z.string().max(60).optional(),
+          municipio: z.string().max(60).optional(),
+          uf: z.string().length(2).optional(),
+        })
+        .optional(),
+      volumes: z
+        .array(
+          z.object({
+            quantidade: z.coerce.number().int().nonnegative().optional(),
+            especie: z.string().max(60).optional(),
+            peso_liquido: z.coerce.number().nonnegative().optional(),
+            peso_bruto: z.coerce.number().nonnegative().optional(),
+          }),
+        )
+        .optional(),
+    })
+    .optional(),
+  /** NF-e de entrada de importação: exportador (destinatário no exterior) e DI. */
+  importacao: z
+    .object({
+      exportador: z.object({
+        nome: z.string().min(1).max(60),
+        logradouro: z.string().min(1).max(60),
+        numero: z.string().max(60).optional(),
+        bairro: z.string().max(60).optional(),
+        municipio: z.string().min(1).max(60),
+        pais_codigo: z.string().regex(/^\d{4}$/),
+        pais_nome: z.string().min(1).max(60),
+        id_estrangeiro: z.string().max(20).optional(),
+      }),
+      di: z.object({
+        numero: z.string().regex(/^\d{1,15}$/),
+        data_registro: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        local_desembaraco: z.string().min(1).max(60),
+        uf_desembaraco: z.string().length(2),
+        data_desembaraco: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        via_transporte: z.coerce.number().int().min(1).max(12),
+        intermediacao: z.coerce.number().int().min(1).max(3),
+        codigo_exportador: z.string().min(1).max(60),
+      }),
     })
     .optional(),
   informacoes_complementares: z.string().max(5000).optional(),
@@ -473,6 +535,28 @@ async function resolverNaturezaPadrao(
     )
   }
 
+  // Importação: NF-e de ENTRADA emitida pelo próprio importador (CFOP 3102).
+  if (tipoDocumento === 'importacao') {
+    const casa = data.find((n) => /import/i.test(String(n.nome || '')))
+    if (casa) return casa.id
+    const { data: criada, error } = await supabase
+      .from('naturezas_operacao')
+      .insert({
+        empresa_id: empresaId,
+        nome: 'Compra para comercialização - Importação',
+        natureza: 'Compra para comercializacao - Importacao',
+        tipo_operacao: 'entrada',
+        finalidade: 'normal',
+        consumidor_final: false,
+        indicador_presenca: 9,
+        modalidade_frete: 9,
+      })
+      .select('id')
+      .single()
+    if (!error && criada) return criada.id
+    throw new EmissaoRecusadaError('Não foi possível criar a natureza de importação da empresa')
+  }
+
   // Remessa em garantia (peça com defeito de volta ao fabricante) sai com
   // natOp "Remessa em Garantia" e finalidade normal — como as ~80 que a
   // Sobral emitiu pelo SSÓtica (CFOP 6949). Sem a natureza, cairia na de
@@ -555,6 +639,22 @@ async function emitir(
         valorDesconto: i.valor_desconto,
         cfop: i.cfop,
         infoAdicional: i.info_adicional,
+        importacao: i.importacao
+          ? {
+              adicao: i.importacao.adicao,
+              sequencial: i.importacao.sequencial,
+              fabricante: i.importacao.fabricante,
+              valorProduto: i.importacao.valor_produto,
+              baseII: i.importacao.base_ii,
+              valorII: i.importacao.valor_ii,
+              despesasAduaneiras: i.importacao.despesas_aduaneiras,
+              valorAfrmm: i.importacao.valor_afrmm,
+              valorOutras: i.importacao.valor_outras,
+              baseIcms: i.importacao.base_icms,
+              aliquotaIcms: i.importacao.aliquota_icms,
+              valorIcms: i.importacao.valor_icms,
+            }
+          : undefined,
         produto: i.produto
           ? {
               descricao: i.produto.descricao,
@@ -596,6 +696,37 @@ async function emitir(
             modalidade: body.frete.modalidade,
             valor: body.frete.valor_frete,
             valorSeguro: body.frete.valor_seguro,
+            transportadora: body.frete.transportadora ?? null,
+            volumes: body.frete.volumes?.map((v) => ({
+              qVol: v.quantidade,
+              esp: v.especie,
+              pesoL: v.peso_liquido,
+              pesoB: v.peso_bruto,
+            })),
+          }
+        : undefined,
+      importacao: body.importacao
+        ? {
+            exportador: {
+              nome: body.importacao.exportador.nome,
+              logradouro: body.importacao.exportador.logradouro,
+              numero: body.importacao.exportador.numero,
+              bairro: body.importacao.exportador.bairro,
+              municipio: body.importacao.exportador.municipio,
+              paisCodigo: body.importacao.exportador.pais_codigo,
+              paisNome: body.importacao.exportador.pais_nome,
+              idEstrangeiro: body.importacao.exportador.id_estrangeiro,
+            },
+            di: {
+              numero: body.importacao.di.numero,
+              dataRegistro: body.importacao.di.data_registro,
+              localDesembaraco: body.importacao.di.local_desembaraco,
+              ufDesembaraco: body.importacao.di.uf_desembaraco,
+              dataDesembaraco: body.importacao.di.data_desembaraco,
+              viaTransporte: body.importacao.di.via_transporte,
+              intermediacao: body.importacao.di.intermediacao,
+              codigoExportador: body.importacao.di.codigo_exportador,
+            },
           }
         : undefined,
       informacoesComplementares: body.informacoes_complementares,

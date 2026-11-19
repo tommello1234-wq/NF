@@ -108,6 +108,54 @@ export interface NfeInput {
   }
   enviarEmailPosEmissao?: boolean
   emailDestinatario?: string
+  /** NF-e de entrada de importação (tipoDocumento 'importacao'). */
+  importacao?: ImportacaoInput
+}
+
+/**
+ * Dados da importação: o exportador vira o destinatário (estrangeiro) e a DI
+ * vai em cada item. Valores de II, despesas e ICMS vêm prontos da planilha do
+ * despachante — a nota tem que bater centavo a centavo com o que foi pago.
+ */
+export interface ImportacaoInput {
+  exportador: {
+    nome: string
+    logradouro: string
+    numero?: string
+    bairro?: string
+    municipio: string
+    paisCodigo: string   // tabela BACEN, ex '1600' China
+    paisNome: string
+    idEstrangeiro?: string
+  }
+  di: {
+    numero: string             // nDI, só dígitos
+    dataRegistro: string       // AAAA-MM-DD
+    localDesembaraco: string
+    ufDesembaraco: string
+    dataDesembaraco: string    // AAAA-MM-DD
+    viaTransporte: number      // 1 marítima, 4 aérea, 7 rodoviária...
+    intermediacao: number      // 1 conta própria, 2 conta e ordem, 3 encomenda
+    codigoExportador: string
+  }
+}
+
+/** Valores de importação de um item (vêm da planilha do despachante). */
+export interface ItemImportacaoInput {
+  adicao: number
+  sequencial: number
+  fabricante: string
+  /** vProd = valor aduaneiro (CIF) do item, exato. */
+  valorProduto: number
+  baseII: number
+  valorII: number
+  despesasAduaneiras: number
+  valorAfrmm: number
+  /** PIS + COFINS + Siscomex + AFRMM + ICMS de importação → vOutro. */
+  valorOutras: number
+  baseIcms: number
+  aliquotaIcms: number
+  valorIcms: number
 }
 
 export interface ItemInput {
@@ -132,6 +180,7 @@ export interface ItemInput {
    * mesmos defaults usados pro produto do banco.
    */
   produto?: ItemProdutoInline
+  importacao?: ItemImportacaoInput
 }
 
 /** Produto descrito no próprio payload (ERP externo dono do catálogo). */
@@ -195,6 +244,7 @@ export interface FreteInput {
     ie?: string | null
     uf?: string | null
     municipio?: string | null
+    endereco?: string | null
   } | null
   /** Veículo completo */
   veiculo?: {
