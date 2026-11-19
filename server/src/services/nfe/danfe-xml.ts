@@ -136,6 +136,8 @@ export function overlayDoXmlAutorizado(xml: string): DanfeXmlOverlay | null {
     valor_icms: n(total.vICMS),
     valor_icms_st: n(total.vST),
     valor_ipi: n(total.vIPI),
+    // Imposto de importação (NF-e de entrada de importação) — o DANFE mostra em "V. Imp. Importação".
+    valor_importacao: n(total.vII),
     valor_pis: n(total.vPIS),
     valor_cofins: n(total.vCOFINS),
     valor_total: n(total.vNF),
