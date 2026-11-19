@@ -138,8 +138,16 @@ export async function cancelarNota(
     | Record<string, unknown>
     | undefined
   const infEvento = (retEvento?.infEvento || ret.infEvento) as Record<string, unknown> | undefined
-  const cStat = String(infEvento?.cStat ?? ret.cStat ?? '')
-  const xMotivo = String(infEvento?.xMotivo ?? ret.xMotivo ?? '')
+  // Se a estrutura da resposta vier diferente do esperado, pega o cStat/xMotivo
+  // do evento direto do XML (o último é o do evento; o primeiro, o do lote).
+  // Sem isso a loja via "SEFAZ não devolveu o motivo" (NFC-e 248 Sobral, 19/11).
+  const doXml = (tag: string) => {
+    const achados = [...raw.body.matchAll(new RegExp(`<(?:\\w+:)?${tag}>([^<]*)</(?:\\w+:)?${tag}>`, 'g'))]
+    return achados.length ? achados[achados.length - 1][1] : ''
+  }
+  const cStat = String(infEvento?.cStat ?? ret.cStat ?? '') || doXml('cStat')
+  const xMotivo = String(infEvento?.xMotivo ?? ret.xMotivo ?? '') || doXml('xMotivo') ||
+    (raw.body.trim() ? `resposta inesperada da SEFAZ: ${raw.body.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200)}` : 'SEFAZ respondeu vazio')
   const protocolo = String(infEvento?.nProt ?? '')
 
   const homologado = cStat === '135' || cStat === '155'
